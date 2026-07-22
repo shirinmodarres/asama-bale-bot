@@ -1,0 +1,33 @@
+{
+  "users": {
+    "2096104242": {
+      "telegram_id": 2096104242,
+      "role": "seller",
+      "store_code": "6",
+      "full_name": "پرنیان محمدي",
+      "phone": "09123457698",
+      "status": "active",
+      "wallet": {
+        "balance": 278000,
+        "transactions": [
+          {
+            "id": "wallet:ORD-000001:1",
+            "type": "credit",
+            "amount": 180200,
+            "description": "شارژ بابت تایید فاکتور سفارش ORD-000001 کالای 1",
+            "created_at": "2026-07-21T06:23:35"
+          },
+          {
+            "id": "wallet:ORD-000002:1",
+            "type": "credit",
+            "amount": 97800,
+            "description": "شارژ بابت تایید فاکتور سفارش ORD-000002 کالای 1",
+            "created_at": "2026-07-21T07:23:36"
+          }
+        ]
+      },
+      "created_at": "2026-07-21T06:19:32",
+      "updated_at": "2026-07-21T07:23:36"
+    }
+  }
+}

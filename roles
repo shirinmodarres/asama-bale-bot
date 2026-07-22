@@ -1,0 +1,437 @@
+# ==============================================================
+# بخش ۲ سند — نقش‌ها و سطح دسترسی (RBAC)
+# ==============================================================
+#
+# نحوه‌ی اضافه کردن به کد فعلی‌تان:
+#   این کد را داخل sefareshbot.py، بلافاصله بعد از تابع `is_seller`
+#   (یعنی بعد از بخش موجود «مدیریت نقش‌ها») بچسبانید.
+#
+# وابستگی‌ها (این‌ها از قبل در کد فعلی شما هستند و دوباره تعریف نمی‌شوند):
+#   - _load(path, default) / _save(path, data)
+#   - get_role(user_id)   -> "admin" | "manager" | "expert" | "seller" | None
+#   - admin_ID
+#   - load_stores() / get_store_owner(store_id) از بخش مدیریت فروشگاه
+#
+# این فایل دو کار می‌کند:
+#   ۱. یک مدل داده جدید اضافه می‌کند: رابطه‌ی «کارشناس فروش <-> فروشگاه‌های
+#      تحت مدیریتش» (store_experts.json) — چیزی که در کد فعلی شما وجود نداشت
+#      و بخش ۲.۳ و ۲.۵ سند صراحتاً به آن نیاز دارند.
+#   ۲. یک لایه‌ی permission تعریف می‌کند: هر مسئولیتی که در بخش ۲.۱ تا ۲.۴
+#      سند نوشته شده، یک تابع can_xxx(user_id) یا can_xxx(user_id, store_id)
+#      مجزا دارد — تا در بقیه‌ی کد به‌جای پراکنده چک کردن role == "..."،
+#      همیشه از این توابع استفاده کنید. اسم هر تابع را عمداً مطابق متن
+#      دقیق سند گذاشته‌ام تا ردیابی‌اش بین سند و کد ساده باشد.
+#
+# ==============================================================
+
+
+# ------------------------------------------------------------
+# ۲.۳ / ۲.۵ — رابطه‌ی کارشناس فروش <-> فروشگاه‌های تحت مدیریت
+# ------------------------------------------------------------
+# «هر کارشناس فروش می‌تواند چندین فروشگاه را مدیریت کند» (بخش ۳.۱)
+# «هر فروشگاه فقط به یک کارشناس فروش متصل است» (بخش ۲.۵ و ۳.۱)
+#
+# ساختار فایل store_experts.json:
+#   { "<store_id>": "<expert_user_id>" }
+
+STORE_EXPERTS_DB = "store_experts.json"
+
+
+def load_store_experts():
+    return _load(STORE_EXPERTS_DB, {})
+
+
+def save_store_experts(data):
+    _save(STORE_EXPERTS_DB, data)
+
+
+def get_store_expert(store_id):
+    """کارشناس فروش مسئولِ یک فروشگاه را برمی‌گرداند، یا None."""
+    return load_store_experts().get(str(store_id))
+
+
+def get_stores_of_expert(expert_id):
+    """لیست store_id هایی که یک کارشناس فروش مسئول آن‌هاست."""
+    assigns = load_store_experts()
+    eid = str(expert_id)
+    return [sid for sid, exp in assigns.items() if exp == eid]
+
+
+def assign_expert_to_store(store_id, expert_id, assigned_by=None):
+    """
+    اتصال یک فروشگاه به یک کارشناس فروش.
+    طبق بخش ۲.۱ و ۳.۱: «فقط مدیر سامانه می‌تواند کارشناس فروش یک
+    فروشگاه را تغییر دهد.»
+    """
+    if assigned_by is not None and not can_change_store_expert(assigned_by):
+        return False, "فقط مدیر سامانه می‌تواند کارشناس فروشگاه را تغییر دهد."
+    if get_role(expert_id) != "expert":
+        return False, "کاربر انتخاب‌شده نقش کارشناس فروش ندارد."
+    assigns = load_store_experts()
+    assigns[str(store_id)] = str(expert_id)
+    save_store_experts(assigns)
+    return True, "کارشناس فروش این فروشگاه با موفقیت تنظیم شد."
+
+
+def unassign_store_expert(store_id):
+    assigns = load_store_experts()
+    assigns.pop(str(store_id), None)
+    save_store_experts(assigns)
+
+
+# ------------------------------------------------------------
+# ۲.۱ — مدیر سامانه (admin)
+# ------------------------------------------------------------
+
+def can_manage_users(user_id):
+    """مدیریت کاربران."""
+    return get_role(user_id) == "admin"
+
+
+def can_manage_stores_full(user_id):
+    """مدیریت فروشگاه‌ها (افزودن/حذف/ویرایش کامل)."""
+    return get_role(user_id) == "admin"
+
+
+def can_manage_experts(user_id):
+    """مدیریت کارشناسان فروش (تعریف/حذف نقش کارشناس)."""
+    return get_role(user_id) == "admin"
+
+
+def can_change_user_store(user_id):
+    """تغییر فروشگاه هر کاربر (جابه‌جا کردن یک فروشنده بین فروشگاه‌ها)."""
+    return get_role(user_id) == "admin"
+
+
+def can_change_store_expert(user_id):
+    """تغییر کارشناس مسئول هر فروشگاه."""
+    return get_role(user_id) == "admin"
+
+
+def can_manage_products(user_id):
+    """مدیریت کالاها (افزودن/ویرایش/حذف/فعال-غیرفعال)."""
+    return get_role(user_id) == "admin"
+
+
+def can_manage_prices(user_id):
+    """مدیریت قیمت کالاها."""
+    return get_role(user_id) == "admin"
+
+
+def can_manage_commission_rules(user_id):
+    """مدیریت پورسانت (تعریف نرخ/قوانین پورسانت)."""
+    return get_role(user_id) == "admin"
+
+
+def can_view_all_orders(user_id):
+    """مشاهده تمام سفارش‌ها (بدون محدودیت فروشگاه/کارشناس)."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_view_all_reports(user_id):
+    """مشاهده تمام گزارش‌ها."""
+    return get_role(user_id) == "admin"
+
+
+def can_change_any_order_status(user_id):
+    """تغییر وضعیت هر سفارش (دور زدن state machine عادی، فقط برای اضطرار)."""
+    return get_role(user_id) == "admin"
+
+
+def can_place_order_on_behalf(user_id):
+    """ثبت سفارش از طرف فروشگاه (وقتی خود فروشگاه نمی‌تواند/بلد نیست)."""
+    return get_role(user_id) == "admin"
+
+
+# ------------------------------------------------------------
+# ۲.۲ — مدیر فروش (manager)
+# ------------------------------------------------------------
+
+def can_view_expert_submitted_orders(user_id):
+    """مشاهده سفارش‌های ارسال‌شده توسط کارشناسان (یعنی status=expert_approved)."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_final_approve_order(user_id):
+    """تأیید نهایی سفارش."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_reject_order_as_manager(user_id):
+    """رد سفارش توسط مدیر فروش."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_view_all_store_reports(user_id):
+    """مشاهده گزارش تمام فروشگاه‌ها."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_view_all_expert_reports(user_id):
+    """مشاهده گزارش کارشناسان فروش."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_view_all_store_commissions(user_id):
+    """مشاهده پورسانت فروشگاه‌ها (همه‌ی فروشگاه‌ها)."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+def can_view_sales_stats(user_id):
+    """مشاهده آمار فروش کلی سیستم."""
+    return get_role(user_id) in ("admin", "manager")
+
+
+# ------------------------------------------------------------
+# ۲.۳ — کارشناس فروش (expert)
+# ------------------------------------------------------------
+
+def can_view_managed_stores(user_id):
+    """مشاهده فروشگاه‌های تحت مدیریت خودش."""
+    return get_role(user_id) in ("admin", "manager", "expert")
+
+
+def can_set_store_inventory(user_id, store_id):
+    """
+    ثبت موجودی اولیه یک فروشگاه.
+    فقط برای فروشگاه‌های تحت مدیریت همان کارشناس (یا admin/manager با دسترسی کامل).
+    """
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "expert":
+        return str(store_id) in get_stores_of_expert(user_id)
+    return False
+
+
+def can_view_store_orders(user_id, store_id):
+    """مشاهده سفارش‌های یک فروشگاه مشخص."""
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "expert":
+        return str(store_id) in get_stores_of_expert(user_id)
+    if role == "seller":
+        return get_store_owner(str(store_id)) == str(user_id)
+    return False
+
+
+def can_approve_order_as_expert(user_id, order):
+    """
+    تأیید سفارش توسط کارشناس فروش.
+    فقط اگر سفارش متعلق به یکی از فروشگاه‌های تحت مدیریت همین کارشناس باشد
+    و وضعیت سفارش submitted باشد.
+    """
+    role = get_role(user_id)
+    if role == "admin":
+        return order.get("status") == "submitted"
+    if role != "expert":
+        return False
+    store_id = order.get("store_id")
+    return (
+        order.get("status") == "submitted"
+        and str(store_id) in get_stores_of_expert(user_id)
+    )
+
+
+def can_reject_order_as_expert(user_id, order):
+    """رد سفارش توسط کارشناس فروش — همان شرط تأیید."""
+    return can_approve_order_as_expert(user_id, order)
+
+
+def can_edit_rejected_order(user_id, order):
+    """
+    ویرایش سفارش‌های رد شده.
+    طبق بخش ۳.۶: «سفارش رد شده فقط توسط کارشناس فروش قابل ویرایش است.»
+    """
+    role = get_role(user_id)
+    if role == "admin":
+        return order.get("status") in ("expert_rejected", "manager_rejected")
+    if role != "expert":
+        return False
+    store_id = order.get("store_id")
+    return (
+        order.get("status") in ("expert_rejected", "manager_rejected")
+        and str(store_id) in get_stores_of_expert(user_id)
+    )
+
+
+def can_view_own_store_reports(user_id, store_id):
+    """مشاهده گزارش فروشگاه‌های خودِ کارشناس."""
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "expert":
+        return str(store_id) in get_stores_of_expert(user_id)
+    return False
+
+
+# ------------------------------------------------------------
+# ۲.۴ — فروشگاه (seller)
+# ------------------------------------------------------------
+
+def can_register_store_info(user_id):
+    """
+    ثبت اطلاعات فروشگاه.
+    طبق بخش ۳.۲: فقط یک‌بار مجاز است — این تابع فقط نقش را چک می‌کند؛
+    چک «یک‌بار بودن» باید در لایه‌ی ثبت‌نام (profile/store انجام‌شده یا نه) باشد.
+    """
+    return get_role(user_id) == "seller"
+
+
+def can_edit_own_store_info(user_id):
+    """
+    طبق بخش ۲.۵ و ۳.۲:
+    «اطلاعات فروشگاه پس از ثبت توسط فروشگاه قابل ویرایش نیست، فقط مدیر
+    سامانه می‌تواند آن را تغییر دهد.»
+    یعنی این تابع برای فروشگاه همیشه False است.
+    """
+    return False
+
+
+def can_view_own_inventory(user_id, store_id):
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "expert":
+        return str(store_id) in get_stores_of_expert(user_id)
+    if role == "seller":
+        return get_store_owner(str(store_id)) == str(user_id)
+    return False
+
+
+def can_place_order(user_id, store_id):
+    """ثبت سفارش — فقط خودِ فروشگاه (یا admin از طرف فروشگاه، طبق ۲.۱)."""
+    role = get_role(user_id)
+    if role == "admin":
+        return True
+    if role == "seller":
+        return get_store_owner(str(store_id)) == str(user_id)
+    return False
+
+
+def can_view_own_order_status(user_id, store_id):
+    return can_view_store_orders(user_id, store_id)
+
+
+def can_view_own_commission(user_id, store_id):
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "expert":
+        return str(store_id) in get_stores_of_expert(user_id)
+    if role == "seller":
+        return get_store_owner(str(store_id)) == str(user_id)
+    return False
+
+
+def can_view_own_wallet(user_id, store_id):
+    """مشاهده کیف پول — فقط صاحبِ فروشگاه (یا admin/manager برای نظارت)."""
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return True
+    if role == "seller":
+        return get_store_owner(str(store_id)) == str(user_id)
+    return False
+
+
+# ------------------------------------------------------------
+# ۲.۵ — قوانین دسترسی عمومی (Scoping Helpers)
+# ------------------------------------------------------------
+# این توابع برای فیلتر کردن لیست‌ها استفاده می‌شوند (مثلاً «همه‌ی سفارش‌ها»
+# در دیتابیس را می‌گیریم و بر اساس نقش کاربر فیلتر می‌کنیم) تا هیچ کجای
+# کد به‌طور تصادفی داده‌ی خارج از محدوده‌ی مجاز کاربر نمایش داده نشود.
+
+def get_visible_store_ids(user_id):
+    """
+    لیست store_id هایی که این کاربر مجاز به دیدن آن‌هاست.
+    - admin / manager: همه‌ی فروشگاه‌ها
+    - expert: فقط فروشگاه‌های تحت مدیریتش
+    - seller: فقط فروشگاه خودش
+    """
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        return list(load_stores().keys())
+    if role == "expert":
+        return get_stores_of_expert(user_id)
+    if role == "seller":
+        sid = get_store_owner_of_user(user_id)
+        return [sid] if sid else []
+    return []
+
+
+def get_store_owner_of_user(user_id):
+    """
+    برعکسِ get_store_owner: فروشگاهی که این کاربر (seller) مالک آن است.
+    فرض بر این است که تابع get_store_by_seller در کد فعلی شما وجود دارد
+    (در هر دو نسخه‌ی کد فایلتان این تابع با همین نام تعریف شده).
+    """
+    return get_store_by_seller(user_id)
+
+
+def filter_orders_visible_to_user(user_id, all_orders_iterable):
+    """
+    all_orders_iterable: iterable از (uid, order_dict) — مثل خروجی
+    iter_all_orders() که در کد دوم شما موجود است.
+
+    خروجی: فقط سفارش‌هایی که کاربر طبق بخش ۲.۵ مجاز به دیدنشان است.
+    """
+    role = get_role(user_id)
+    if role in ("admin", "manager"):
+        yield from all_orders_iterable
+        return
+    if role == "expert":
+        my_stores = set(get_stores_of_expert(user_id))
+        for uid, order in all_orders_iterable:
+            if str(order.get("store_id")) in my_stores:
+                yield uid, order
+        return
+    if role == "seller":
+        my_store = get_store_owner_of_user(user_id)
+        for uid, order in all_orders_iterable:
+            if my_store and str(order.get("store_id")) == str(my_store):
+                yield uid, order
+        return
+    return
+
+
+# ------------------------------------------------------------
+# جدول خلاصه (فقط برای مستندسازی/دیباگ — اختیاری)
+# ------------------------------------------------------------
+# می‌توانید این را در دستور /whoami یا مشابه به کاربر نشان دهید تا
+# مطمئن شوید نقش و دسترسی‌اش درست تشخیص داده می‌شود.
+
+ROLE_PERMISSIONS_SUMMARY = {
+    "admin": [
+        "مدیریت کاربران", "مدیریت فروشگاه‌ها", "مدیریت کارشناسان فروش",
+        "تغییر فروشگاه هر کاربر", "تغییر کارشناس مسئول هر فروشگاه",
+        "مدیریت کالاها", "مدیریت قیمت کالاها", "مدیریت پورسانت",
+        "مشاهده تمام سفارش‌ها", "مشاهده تمام گزارش‌ها",
+        "تغییر وضعیت هر سفارش", "ثبت سفارش از طرف فروشگاه",
+    ],
+    "manager": [
+        "مشاهده سفارش‌های ارسال‌شده توسط کارشناسان", "تأیید نهایی سفارش",
+        "رد سفارش", "مشاهده گزارش تمام فروشگاه‌ها",
+        "مشاهده گزارش کارشناسان فروش", "مشاهده پورسانت فروشگاه‌ها",
+        "مشاهده آمار فروش",
+    ],
+    "expert": [
+        "مشاهده فروشگاه‌های تحت مدیریت", "ثبت موجودی اولیه هر فروشگاه",
+        "مشاهده سفارش‌های فروشگاه‌های خود", "تأیید سفارش", "رد سفارش",
+        "ویرایش سفارش‌های رد شده", "مشاهده گزارش فروشگاه‌های خود",
+    ],
+    "seller": [
+        "ثبت اطلاعات فروشگاه", "مشاهده موجودی کالا", "ثبت سفارش",
+        "مشاهده وضعیت سفارش‌ها", "مشاهده پورسانت", "مشاهده کیف پول",
+    ],
+}
+
+
+def get_permission_summary_text(user_id):
+    role = get_role(user_id)
+    if not role:
+        return "این کاربر هیچ نقشی در سیستم ندارد."
+    items = ROLE_PERMISSIONS_SUMMARY.get(role, [])
+    lines = [f"نقش: {role}", "", "دسترسی‌های شما:"]
+    lines += [f"• {item}" for item in items]
+    return "\n".join(lines)

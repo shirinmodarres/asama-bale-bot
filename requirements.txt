@@ -1,0 +1,4 @@
+python-bale-bot==2.5.0
+python-dotenv>=1,<2
+openpyxl>=3.1,<4
+pymongo==4.17.0
