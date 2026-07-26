@@ -8,7 +8,24 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from bot.data.statuses import order_status_label, status_label
+from bot.utils.datetime_format import format_shamsi_datetime
 from data.static_data import SALES_EXPERTS, STORES
+
+
+def _unit_status_label(status: str) -> str:
+    return {
+        "pending": "در انتظار بررسی",
+        "approved": "تایید شده",
+        "rejected": "رد شده",
+    }.get(status, status)
+
+
+def _media_export_value(media: dict) -> str:
+    if not media:
+        return ""
+    if media.get("type") == "photo":
+        return media.get("local_path") or media.get("file_id") or "عکس ارسال شده"
+    return media.get("value") or ""
 
 
 class ExcelService:
@@ -91,26 +108,26 @@ class ExcelService:
             store = STORES.get(request["store_code"], {})
             expert = SALES_EXPERTS.get(store.get("expert_key"), {})
             items_text = "\n".join(
-                f"{item['category_name']} / {item['product_model']} / {item['carton_quantity']}"
+                f"{item['category_name']} / {item.get('product_name', '')} / مدل {item['product_model']} / {item['carton_quantity']} کارتن"
                 for item in request["items"]
             )
             total_cartons = sum(item["carton_quantity"] for item in request["items"])
             sheet.append([
                 request["id"],
                 request["store_code"],
-                store.get("name", ""),
+                request.get("store_name") or store.get("name", ""),
                 request["seller_full_name"],
                 request["seller_phone"],
                 items_text,
                 total_cartons,
-                expert.get("full_name", ""),
+                request.get("expert_name") or expert.get("full_name", ""),
                 status_label(request["status"]),
                 request.get("expert_reject_reason", ""),
                 request.get("manager_reject_reason", ""),
-                request.get("expert_decision_at", ""),
-                request.get("manager_decision_at", ""),
-                request["created_at"],
-                request["updated_at"],
+                format_shamsi_datetime(request.get("expert_decision_at", "")),
+                format_shamsi_datetime(request.get("manager_decision_at", "")),
+                format_shamsi_datetime(request["created_at"]),
+                format_shamsi_datetime(request["updated_at"]),
             ])
 
         self._apply_professional_style(
@@ -131,31 +148,29 @@ class ExcelService:
             units_text = "\n".join(
                 (
                     f"{unit['index']}. "
-                    f"Tracking: {unit['tracking_code'].get('value') or unit['tracking_code'].get('file_id') or ''} "
-                    f"({unit['tracking_code']['type']}) | "
-                    f"Factor: "
-                    f"{(unit.get('factor_image') or {}).get('value') or (unit.get('factor_image') or {}).get('file_id') or ''} "
-                    f"({(unit.get('factor_image') or {}).get('type') or ''}) | "
-                    f"Unit Status: {unit.get('validation_status', 'pending')} | "
-                    f"Reason: {unit.get('rejection_reason_text') or ''}"
+                    f"کد رهگیری: {_media_export_value(unit.get('tracking_code', {}))} | "
+                    f"فاکتور: {_media_export_value(unit.get('factor_image', {}))} | "
+                    f"وضعیت کالا: {_unit_status_label(unit.get('validation_status', 'pending'))} | "
+                    f"علت رد: {unit.get('rejection_reason_text') or ''} | "
+                    f"تاریخ تصمیم: {format_shamsi_datetime(unit.get('validation_decision_at', ''))}"
                 )
                 for unit in order.get("units", [])
             )
             sheet.append([
                 order["id"],
                 order["store_code"],
-                order["store_name"],
+                order.get("store_name", ""),
                 order.get("seller_name", ""),
                 order.get("seller_phone", ""),
-                order["expert_name"],
-                order["category_name"],
-                order["product_name"],
-                order["product_model"],
-                order["quantity"],
+                order.get("expert_name", ""),
+                order.get("category_name", ""),
+                order.get("product_name", ""),
+                order.get("product_model", ""),
+                order.get("quantity", ""),
                 units_text,
-                order_status_label(order["status"]),
+                order_status_label(order.get("status", "")),
                 order.get("rejection_reason_text") or "",
-                order["created_at"],
+                format_shamsi_datetime(order.get("created_at", "")),
             ])
 
         self._apply_professional_style(

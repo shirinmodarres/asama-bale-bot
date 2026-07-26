@@ -10,8 +10,8 @@ class Config:
 
 
 def load_config() -> Config:
-    token = os.getenv("BOT_TOKEN", "").strip()
-    mongo_uri = os.getenv("MONGO_URI", "").strip()
+    token = os.getenv("BOT_TOKEN", "333801949:rZQidZ6apGIDa7mKxH6oMRQLc39YYA0QAtk").strip()
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017").strip()
     mongo_db_name = os.getenv("MONGO_DB_NAME", "asama_bot").strip()
 
     if not token:

@@ -29,6 +29,10 @@ class OrderService:
         )
 
         now = utc_now()
+        units = [
+            self._normalize_unit(draft, unit)
+            for unit in draft["units"]
+        ]
 
         order = {
             "_sequence": next_id,
@@ -47,7 +51,7 @@ class OrderService:
             "product_model": draft["product_model"],
             "product_price": draft.get("product_price", 0),
             "quantity": draft["quantity"],
-            "units": draft["units"],
+            "units": units,
             "status": ORDER_PENDING_EXPERT_VALIDATION,
             "rejection_reason_key": None,
             "rejection_reason_text": None,
@@ -169,6 +173,7 @@ class OrderService:
             if int(unit["index"]) == int(unit_index):
 
                 unit.update(changes)
+                unit["validation_decision_at"] = utc_now()
 
                 order["status"] = self._calculate_order_status(
                     order
@@ -190,6 +195,36 @@ class OrderService:
                 return self.get_order(order_id)
 
         return None
+
+    def _normalize_unit(
+        self,
+        draft: dict,
+        unit: dict,
+    ) -> dict:
+
+        normalized = dict(unit)
+        normalized.update(
+            {
+                "store_code": draft["store_code"],
+                "store_name": draft["store_name"],
+                "seller_telegram_id": draft["seller_telegram_id"],
+                "seller_name": draft["seller_name"],
+                "seller_phone": draft["seller_phone"],
+                "expert_telegram_id": draft["expert_telegram_id"],
+                "expert_name": draft["expert_name"],
+                "category_key": draft["category_key"],
+                "category_name": draft["category_name"],
+                "product_key": draft["product_key"],
+                "product_name": draft["product_name"],
+                "product_model": draft["product_model"],
+                "product_price": draft.get("product_price", 0),
+                "validation_decision_at": unit.get("validation_decision_at", ""),
+            }
+        )
+        normalized.setdefault("validation_status", "pending")
+        normalized.setdefault("rejection_reason_key", None)
+        normalized.setdefault("rejection_reason_text", None)
+        return normalized
 
     def _calculate_order_status(
         self,

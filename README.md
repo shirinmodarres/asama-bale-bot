@@ -1,20 +1,17 @@
 # asama-bot
 
-Simple Python Telegram bot MVP for the Atka sales goods request and seller product order flows.
+Simple Python Bale bot MVP for the Atka sales goods request and seller product order flows.
 
-No backend or database is used. Static data is manually maintained in one file, and runtime data is stored in JSON files.
+Static data is manually maintained in one file, and runtime data is stored in MongoDB.
 
 ## Structure
 
 - `bot/main.py` - application setup and handler registration.
 - `bot/config.py` - environment config.
 - `bot/handlers/` - start, seller, expert, manager, and admin command/callback handlers.
-- `bot/services/` - user JSON storage, request/order JSON storage, Excel export, and notifications.
-- `bot/utils/` - keyboards and safe JSON helpers.
+- `bot/services/` - user/request/order Mongo storage, Excel export, and notifications.
+- `bot/utils/` - keyboards and helpers.
 - `data/static_data.py` - single source of truth for stores, categories, products, experts, manager, and admin.
-- `data/users.json` - created automatically for runtime users/sellers.
-- `data/requests.json` - created automatically for goods requests.
-- `data/orders.json` - created automatically for seller product orders.
 - `sefareshbot.py` - run wrapper.
 
 ## Static Data
@@ -43,10 +40,11 @@ Set your real bot token in `.env`:
 
 ```bash
 BOT_TOKEN=your-token
-USERS_FILE=data/users.json
-REQUESTS_FILE=data/requests.json
-ORDERS_FILE=data/orders.json
+MONGO_URI=mongodb://localhost:27017
+MONGO_DB_NAME=asama_bot
 ```
+
+MongoDB must be running before starting the bot.
 
 ## Run
 

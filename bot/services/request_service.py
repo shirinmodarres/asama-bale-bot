@@ -9,6 +9,7 @@ from bot.data.statuses import (
     REJECTED_BY_EXPERT,
     REJECTED_BY_MANAGER,
 )
+from data.static_data import STORES
 
 
 def utc_now() -> str:
@@ -42,10 +43,12 @@ class RequestService:
         request = {
             "id": next_id,
             "store_code": seller["store_code"],
+            "store_name": STORES.get(str(seller["store_code"]), {}).get("name", ""),
             "seller_telegram_id": seller["telegram_id"],
             "seller_full_name": seller["full_name"],
             "seller_phone": seller["phone"],
             "expert_telegram_id": expert["telegram_id"],
+            "expert_name": expert["full_name"],
             "items": items,
             "status": PENDING_EXPERT,
             "expert_reject_reason": "",
@@ -298,8 +301,8 @@ class RequestService:
 
         now = utc_now()
 
-        request["status"] = APPROVED_BY_EXPERT
-        request["expert_decision_at"] = now
+        request["status"] = PENDING_EXPERT
+        request["expert_decision_at"] = ""
         request["updated_at"] = now
 
         self.collection.update_one(
@@ -307,8 +310,8 @@ class RequestService:
             {
                 "$set": {
                     "items": items,
-                    "status": APPROVED_BY_EXPERT,
-                    "expert_decision_at": now,
+                    "status": PENDING_EXPERT,
+                    "expert_decision_at": "",
                     "updated_at": now,
                 }
             },

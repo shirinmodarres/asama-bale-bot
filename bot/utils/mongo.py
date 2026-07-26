@@ -4,7 +4,7 @@ from pymongo import MongoClient
 
 
 def get_mongo_client() -> MongoClient:
-    mongo_uri = os.getenv("MONGO_URI", "").strip()
+    mongo_uri = os.getenv("MONGO_URI", "mongodb://localhost:27017").strip()
 
     if not mongo_uri:
         raise RuntimeError("MONGO_URI is required.")

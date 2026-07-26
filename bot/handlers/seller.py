@@ -2,7 +2,7 @@ from bale import Message, CallbackQuery
 
 from bot.data.messages import MESSAGES
 from bot.data.statuses import status_label
-from bot.services.notification_service import notify_expert_request
+from bot.services.notification_service import format_request, notify_expert_request
 from bot.data.statuses import ACTIVE
 from bot.utils.keyboards import (
     BTN_ADD_ITEM,
@@ -15,6 +15,7 @@ from bot.utils.keyboards import (
     draft_items_keyboard,
     products_keyboard,
     quantity_change_keyboard,
+    request_review_keyboard,
     seller_main_menu,
     summary_menu,
 )
@@ -184,8 +185,40 @@ async def submit_request(message: Message, context: dict):
     user_service = context["user_service"]
     request_service = context["request_service"]
     seller = user_service.get_user(message.author.id)
-    expert = get_expert_for_store(seller["store_code"])
-    request = request_service.create_request(seller, expert, context["items"])
+    if not seller or seller.get("role") != "seller" or seller.get("status") != ACTIVE:
+        for key in ("items", "category_key", "category_name", "product_key", "product_name", "product_model", "state"):
+            context.pop(key, None)
+        await message.reply(MESSAGES["not_approved_seller"])
+        return
+
+    items = context.get("items") or []
+    if not items:
+        context.pop("state", None)
+        await message.reply(MESSAGES["no_items_left"], components=seller_main_menu())
+        return
+
+    store_code = seller.get("store_code")
+    store = get_store(store_code)
+    if not store:
+        for key in ("items", "category_key", "category_name", "product_key", "product_name", "product_model", "state"):
+            context.pop(key, None)
+        await message.reply(MESSAGES["invalid_store_code"], components=seller_main_menu())
+        return
+
+    if store and not store.get("active", True):
+        for key in ("items", "category_key", "category_name", "product_key", "product_name", "product_model", "state"):
+            context.pop(key, None)
+        await message.reply(MESSAGES["store_inactive"], components=seller_main_menu())
+        return
+
+    expert = get_expert_for_store(store_code)
+    if not expert or not expert.get("active", True):
+        for key in ("items", "category_key", "category_name", "product_key", "product_name", "product_model", "state"):
+            context.pop(key, None)
+        await message.reply(MESSAGES["expert_inactive"], components=seller_main_menu())
+        return
+
+    request = request_service.create_request(seller, expert, items)
     await notify_expert_request(context, expert, request)
     # پاک کردن فقط داده‌های مربوط به درخواست
     for key in ("items", "category_key", "category_name", "product_key", "product_name", "product_model", "state"):
@@ -247,14 +280,19 @@ async def quantity_change_callback(callback: CallbackQuery, context: dict):
     if action == "approve":
         new_quantity = item.get("pending_quantity")
         request = request_service.confirm_item_quantity_change(request_id, index)
-        await callback.message.edit(MESSAGES["quantity_change_confirmed_and_submitted_to_seller"])
+        await callback.message.edit(MESSAGES["quantity_change_confirmed_to_seller"])
         await context["bot"].send_message(
             request["expert_telegram_id"],
-            MESSAGES["quantity_change_confirmed_and_submitted_notify_expert"].format(
+            MESSAGES["quantity_change_confirmed_notify_expert"].format(
                 request_id=request_id,
                 product_model=product_model,
                 quantity=new_quantity,
             ),
+        )
+        await context["bot"].send_message(
+            request["expert_telegram_id"],
+            format_request(request, MESSAGES["request_needs_expert_review_again"]),
+            components=request_review_keyboard(request["id"], request.get("items", [])),
         )
         return
 

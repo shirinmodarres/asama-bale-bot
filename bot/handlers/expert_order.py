@@ -65,7 +65,7 @@ async def _save_photo(message: Message, context: dict, kind: str) -> dict:
 async def _media_value(message: Message, context: dict, kind: str):
     if message.photos:
         return await _save_photo(message, context, kind)
-    return {"type": "text", "value": message.content.strip() if message.content else "", "file_id": None}
+    return {"type": "text", "value": normalize_digits(message.content or ""), "file_id": None}
 
 
 def _format_media(value: dict) -> str:
@@ -110,14 +110,10 @@ def _format_money(amount: int) -> str:
 
 
 def _unit_approved_expert_text(order: dict, unit: dict) -> str:
-    """متن نهایی پیام کارشناس بعد از «تأیید نهایی ثبت سریال».
-
-    اطلاعات مهم (شماره سریال، نام فروشنده، محصول) از همان دیتای order/unit
-    که به‌روزرسانی شده، دوباره ساخته می‌شود تا چیزی گم نشود.
-    """
+    """متن نهایی پیام کارشناس بعد از تأیید اعتبارسنجی یک کالا."""
     tracking_value = _format_media(unit.get("tracking_code") or {"type": "text", "value": "-", "file_id": None})
     lines = [
-        "✅ ثبت سریال با موفقیت تأیید نهایی شد",
+        "✅ کالای سفارش با موفقیت تأیید شد",
         "",
         MESSAGES["order_summary_seller"].format(seller_name=order.get("seller_name", "-")),
         MESSAGES["order_summary_product"].format(
@@ -125,37 +121,54 @@ def _unit_approved_expert_text(order: dict, unit: dict) -> str:
             product_name=order["product_name"],
             product_model=order["product_model"],
         ),
-        f"شماره سریال: {tracking_value}",
+        f"کد رهگیری: {tracking_value}",
         f"سفارش: {order['id']} | کالای شماره {unit['index']}",
+        f"وضعیت سفارش: {order_status_label(order['status'])}",
     ]
     return "\n".join(lines)
 
 
-async def _finalize_expert_message(context: dict, message: Message, text: str) -> None:
-    """پیام قبلی کارشناس را به وضعیت نهایی تغییر می‌دهد و دکمه‌ها را حذف می‌کند.
+def _unit_rejected_expert_text(order: dict, unit: dict) -> str:
+    tracking_value = _format_media(unit.get("tracking_code") or {"type": "text", "value": "-", "file_id": None})
+    lines = [
+        "❌ کالای سفارش رد شد",
+        "",
+        MESSAGES["order_summary_seller"].format(seller_name=order.get("seller_name", "-")),
+        MESSAGES["order_summary_product"].format(
+            category_name=order["category_name"],
+            product_name=order["product_name"],
+            product_model=order["product_model"],
+        ),
+        f"کد رهگیری: {tracking_value}",
+        f"سفارش: {order['id']} | کالای شماره {unit['index']}",
+        f"وضعیت سفارش: {order_status_label(order['status'])}",
+    ]
+    if unit.get("rejection_reason_text"):
+        lines.append(f"علت رد: {unit['rejection_reason_text']}")
+    return "\n".join(lines)
 
-    برخی از پیام‌های تأیید سریال به‌صورت عکس همراه با caption ارسال شده‌اند
-    (رجوع کنید به pending_orders/_send_order_units_to_expert). در نسخه‌ی فعلی
-    کتابخانه‌ی Bale که در این پروژه استفاده می‌شود، Message.edit فقط برای
-    ویرایش پیام‌های متنی مستند و پشتیبانی شده و برای caption عکس کار نمی‌کند؛
-    اگر مستقیماً edit شود، فراخوانی با خطا مواجه می‌شود و پیام/دکمه‌های قبلی
-    دقیقاً همان‌طور که بودند باقی می‌مانند (همان چیزی که باعث این باگ می‌شد).
-    برای همین ابتدا edit را امتحان می‌کنیم و اگر ممکن نبود، پیام قبلی حذف و
-    یک پیام متنی جدید و تمیز (بدون دکمه) جای آن ارسال می‌شود.
+
+async def _finalize_expert_message(context: dict, message: Message, text: str, expert_id: int | None = None) -> None:
+    """Remove the old validation message/buttons and send a clean final result.
+
+    python-bale-bot only sends reply_markup when components is truthy, so
+    edit(..., components=None) does not reliably remove inline buttons.
     """
-    try:
-        await message.edit(text, components=None)
-        return
-    except Exception:
-        logger.info(
-            "_finalize_expert_message: ویرایش مستقیم پیام کارشناس ممکن نشد "
-            "(احتمالاً پیام از نوع عکس/caption است)؛ حذف پیام قبلی و ارسال پیام نهایی جدید"
-        )
     try:
         await message.delete()
     except Exception:
         logger.exception("_finalize_expert_message: حذف پیام قبلی کارشناس ناموفق بود")
-    await context["bot"].send_message(message.chat_id, text)
+    target_id = expert_id or getattr(message, "chat_id", None)
+    if target_id:
+        try:
+            await context["bot"].send_message(target_id, text)
+            return
+        except Exception:
+            logger.exception("_finalize_expert_message: ارسال پیام نهایی به کارشناس ناموفق بود")
+    try:
+        await message.reply(text)
+    except Exception:
+        logger.exception("_finalize_expert_message: reply پیام نهایی به کارشناس ناموفق بود")
 
 
 def _unit_summary(order: dict, unit: dict) -> str:
@@ -629,7 +642,12 @@ async def order_validation_callback(callback: CallbackQuery, context: dict):
             (item for item in order.get("units", []) if int(item["index"]) == unit_index),
             unit,
         )
-        await _finalize_expert_message(context, callback.message, _unit_approved_expert_text(order, approved_unit))
+        expert_text = _unit_approved_expert_text(order, approved_unit)
+        await context["bot"].send_message(
+            callback.from_user.id,
+            f"{MESSAGES['order_unit_approved_done']}\n{order['id']} - کالای شماره {unit_index}",
+        )
+        await _finalize_expert_message(context, callback.message, expert_text, callback.from_user.id)
 
         if not context["order_service"].has_pending_units(order):
             await context["bot"].send_message(
@@ -665,7 +683,13 @@ async def choose_order_rejection_reason(callback: CallbackQuery, context: dict):
         order["seller_telegram_id"],
         MESSAGES["order_unit_rejected_notify"].format(index=unit_index, order_id=order["id"], reason=reason),
     )
-    await callback.message.edit(MESSAGES["order_unit_rejected_done"])
+    rejected_unit = next((item for item in order.get("units", []) if int(item["index"]) == unit_index), {})
+    expert_text = _unit_rejected_expert_text(order, rejected_unit)
+    await context["bot"].send_message(
+        callback.from_user.id,
+        f"{MESSAGES['order_unit_rejected_done']}\n{order['id']} - کالای شماره {unit_index}",
+    )
+    await _finalize_expert_message(context, callback.message, expert_text, callback.from_user.id)
     if not context["order_service"].has_pending_units(order):
         await context["bot"].send_message(
             order["seller_telegram_id"],
@@ -684,7 +708,8 @@ async def receive_custom_rejection_reason(message: Message, context: dict):
         order["seller_telegram_id"],
         MESSAGES["order_unit_rejected_notify"].format(index=unit_index, order_id=order["id"], reason=reason),
     )
-    await message.reply(MESSAGES["order_unit_rejected_done"])
+    rejected_unit = next((item for item in order.get("units", []) if int(item["index"]) == unit_index), {})
+    await message.reply(_unit_rejected_expert_text(order, rejected_unit))
     if not context["order_service"].has_pending_units(order):
         await context["bot"].send_message(
             order["seller_telegram_id"],
