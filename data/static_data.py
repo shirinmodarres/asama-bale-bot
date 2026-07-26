@@ -19,11 +19,11 @@ SALES_MANAGER = {
 
 SALES_EXPERTS = {
     "expert_1": {
-        "telegram_id": 1622824763,
+        "telegram_id": 359839746,
         "full_name": "آقای کوهی ",
     },
     "expert_2": {
-        "telegram_id": 838414503,
+        "telegram_id": 557925611,
         "full_name": "خانم مدیری",
     },
 }
