@@ -5,7 +5,7 @@ from pathlib import Path
 
 from bot.data.messages import MESSAGES, VALIDATION_REJECTION_REASONS
 from bot.data.statuses import ACTIVE, order_status_label
-from bot.services.user_service import calculate_commission
+from bot.services.user_service import COMMISSION_PERCENT, calculate_commission
 from bot.utils.keyboards import (
     BTN_CANCEL,
     categories_keyboard,
@@ -616,12 +616,20 @@ async def order_validation_callback(callback: CallbackQuery, context: dict):
 
         # مرحله‌ی ۲: DB با موفقیت آپدیت شد؛ حالا محاسبه‌ی کمیسیون و اطلاع به فروشنده.
         commission = calculate_commission(order.get("product_price", 0))
+        transaction_id = f"wallet:{order['id']}:{unit_index}"
         wallet, credited = context["user_service"].credit_wallet(
             order["seller_telegram_id"],
             commission,
-            transaction_id=f"wallet:{order['id']}:{unit_index}",
+            transaction_id=transaction_id,
             description=f"شارژ بابت تایید فاکتور سفارش {order['id']} کالای {unit_index}",
         )
+        order = context["order_service"].save_unit_commission(
+            order["id"],
+            unit_index,
+            COMMISSION_PERCENT,
+            commission,
+            transaction_id,
+        ) or order
         await context["bot"].send_message(
             order["seller_telegram_id"],
             MESSAGES["order_unit_approved_notify"].format(index=unit_index, order_id=order["id"]),

@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from bot.data.statuses import ACTIVE, PENDING_SELLER_APPROVAL, SELLER_REJECTED
 
 
-COMMISSION_PERCENT = 4
+COMMISSION_PERCENT = 2
 
 
 def calculate_commission(product_price: int) -> int:

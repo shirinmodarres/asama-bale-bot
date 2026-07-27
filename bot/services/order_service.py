@@ -137,6 +137,54 @@ class OrderService:
             rejection_reason_text=None,
         )
 
+    def save_unit_commission(
+        self,
+        order_id: str,
+        unit_index: int,
+        commission_percent: int,
+        commission_amount: int,
+        transaction_id: str,
+    ) -> dict | None:
+
+        order = self.collection.find_one(
+            {"id": order_id},
+        )
+
+        if not order:
+            return None
+
+        units = order.get("units", [])
+
+        for unit in units:
+            if int(unit["index"]) == int(unit_index):
+                unit["commission_percent"] = commission_percent
+                unit["commission_amount"] = commission_amount
+                unit["commission_transaction_id"] = transaction_id
+                break
+        else:
+            return None
+
+        approved_commission_total = sum(
+            int(unit.get("commission_amount") or 0)
+            for unit in units
+            if unit.get("validation_status") == "approved"
+        )
+
+        now = utc_now()
+        self.collection.update_one(
+            {"id": order_id},
+            {
+                "$set": {
+                    "units": units,
+                    "commission_percent": commission_percent,
+                    "commission_amount": approved_commission_total,
+                    "updated_at": now,
+                }
+            },
+        )
+
+        return self.get_order(order_id)
+
     def reject_unit_validation(
         self,
         order_id: str,
