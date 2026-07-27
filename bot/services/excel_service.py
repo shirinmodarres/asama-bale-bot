@@ -28,6 +28,28 @@ def _media_export_value(media: dict) -> str:
     return media.get("value") or ""
 
 
+def _first_unit_value(order: dict, field_name: str):
+    for unit in order.get("units", []):
+        value = unit.get(field_name)
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def _order_or_first_unit_value(order: dict, field_name: str):
+    value = order.get(field_name)
+    if value not in (None, ""):
+        return value
+    return _first_unit_value(order, field_name)
+
+
+def _percent_export_value(value) -> str:
+    if value in (None, ""):
+        return ""
+    text = str(value).strip()
+    return text if text.endswith("٪") or text.endswith("%") else f"{text}٪"
+
+
 class ExcelService:
     HEADERS = [
         "Request ID",
@@ -82,11 +104,14 @@ class ExcelService:
         "وضعیت",
         "دلیل رد",
         "تاریخ ایجاد",
+        "قیمت واحد کالا",
+        "درصد پورسانت",
+        "مبلغ پورسانت دریافت‌شده",
     ]
 
     # ستون‌هایی که باید به‌صورت عدد صحیح (بدون اعشار) نمایش داده شوند (۱-بیس، بر اساس شماره ستون در اکسل)
     REQUEST_INTEGER_COLUMNS = {1, 7}  # شناسه درخواست، مجموع کارتن
-    ORDER_INTEGER_COLUMNS = {1, 10}  # شناسه سفارش، تعداد
+    ORDER_INTEGER_COLUMNS = {1, 10, 15, 17}  # شناسه سفارش، تعداد، قیمت واحد، مبلغ پورسانت
 
     # ستون‌هایی که متن چندخطی دارند و باید wrap شوند
     REQUEST_WRAP_COLUMNS = {6}  # اقلام
@@ -171,6 +196,9 @@ class ExcelService:
                 order_status_label(order.get("status", "")),
                 order.get("rejection_reason_text") or "",
                 format_shamsi_datetime(order.get("created_at", "")),
+                _order_or_first_unit_value(order, "product_price"),
+                _percent_export_value(_order_or_first_unit_value(order, "commission_percent")),
+                _order_or_first_unit_value(order, "commission_amount"),
             ])
 
         self._apply_professional_style(
