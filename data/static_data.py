@@ -6,7 +6,7 @@ Do not hardcode this data inside handlers.
 """
 
 ADMINS = [
-    {"telegram_id": 700144333, "full_name": "System Manager"},
+    # {"telegram_id": 700144333, "full_name": "System Manager"}, 
     {"telegram_id": 583160697, "full_name": "Admin 2"},
 ]
 
@@ -25,6 +25,10 @@ SALES_EXPERTS = {
     "expert_2": {
         "telegram_id": 557925611,
         "full_name": "خانم مدیری",
+    },
+    "expert_3": {
+        "telegram_id": 700144333,
+        "full_name": "کارشناس تست",
     },
 }
 
@@ -68,6 +72,7 @@ STORES = {
     "37": {"code": "37", "name": "قصر فیروزه", "expert_key": "expert_2"},
     "38": {"code": "38", "name": "دزفول", "expert_key": "expert_2"},
     "39": {"code": "39", "name": "ارومیه", "expert_key": "expert_2"},
+    "1382": {"code": "1382", "name": "تست", "expert_key": "expert_3"},
 }
 
 CATEGORIES = {
