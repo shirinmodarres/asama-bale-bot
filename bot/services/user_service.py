@@ -7,8 +7,8 @@ COMMISSION_PERCENT = 4
 
 
 def calculate_commission(product_price: int) -> int:
-    """Return the seller's commission in whole tomans."""
-    return int(product_price) * COMMISSION_PERCENT // 100
+    """Return the seller's commission in whole tomans, rounded up."""
+    return (int(product_price) * COMMISSION_PERCENT + 99) // 100
 
 
 def utc_now() -> str:
