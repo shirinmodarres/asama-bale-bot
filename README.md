@@ -24,8 +24,8 @@ Edit `data/static_data.py` before running:
 - `STORES`
 - `CATEGORIES`
 
-Each product has a `price` in tomans. Set the real value before accepting
-orders; approving each order unit credits 2% of its snapshotted product price
+Each product has a `price` in rials. Set the real value before accepting
+orders; approving each order unit credits 4% of its snapshotted product price
 to the seller wallet.
 
 ## Install

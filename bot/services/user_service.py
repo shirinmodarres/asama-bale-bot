@@ -7,7 +7,7 @@ COMMISSION_PERCENT = 4
 
 
 def calculate_commission(product_price: int) -> int:
-    """Return the seller's commission in whole tomans, rounded up."""
+    """Return the seller's commission in whole rials, rounded up."""
     return (int(product_price) * COMMISSION_PERCENT + 99) // 100
 
 

@@ -73,7 +73,7 @@ MESSAGES = {
     "admin_request_title_bot": "تغییر وضعیت ربات",
     "admin_request_created": "✅ درخواست شما برای «{title}» ثبت شد. شماره: {request_id}",
     "admin_action_request_detail": "📄 جزئیات درخواست:\nعنوان: {title}\nوضعیت: {status}\nزمان ثبت: {created_at}\n\nبا انتخاب تأیید یا رد، این عملیات اجرا یا لغو خواهد شد.",
-    "admin_product_action_prompt": "📦 کالا: {title}\nدسته‌بندی: {category}\nمدل: {model}\nقیمت: {price} تومان\nوضعیت فعلی: {status}\nلطفاً عملیات مورد نظر را انتخاب کنید.",
+    "admin_product_action_prompt": "📦 کالا: {title}\nدسته‌بندی: {category}\nمدل: {model}\nقیمت: {price} ریال\nوضعیت فعلی: {status}\nلطفاً عملیات مورد نظر را انتخاب کنید.",
     "admin_store_action_prompt": "🏬 فروشگاه: {code} - {name}\nوضعیت فعلی: {status}\nلطفاً عملیات مورد نظر را انتخاب کنید.",
     "admin_expert_action_prompt": "👨‍💼 کارشناس: {key} - {name}\nوضعیت فعلی: {status}\nلطفاً عملیات مورد نظر را انتخاب کنید.",
     "product_status_updated": "✅ وضعیت کالا با موفقیت به‌روزرسانی شد.",
@@ -148,16 +148,16 @@ MESSAGES = {
     "order_unit_rejected_done": "❌ کالا رد شد.",
     "order_unit_already_reviewed": "⚠️ این کالا قبلاً بررسی شده است.",
     "order_unit_approved_notify": "✅ کالای شماره {index} از سفارش {order_id} توسط کارشناس تایید شد.",
-    "order_unit_wallet_charged_notify": "💰 کیف پول شما بابت فاکتور تاییدشده {amount} تومان شارژ شد. موجودی فعلی: {balance} تومان",
+    "order_unit_wallet_charged_notify": "💰 کیف پول شما بابت فاکتور تاییدشده {amount} ریال شارژ شد. موجودی فعلی: {balance} ریال",
     "order_unit_rejected_notify": "❌ کالای شماره {index} از سفارش {order_id} توسط کارشناس رد شد. علت: {reason}",
     "order_all_units_done": "📋 همه کالاهای این سفارش بررسی شدند. وضعیت نهایی سفارش: {status}",
 
     # ====== کیف پول ======
     "wallet_title": "💰 کیف پول شما",
-    "wallet_balance": "موجودی: {balance} تومان",
+    "wallet_balance": "موجودی: {balance} ریال",
     "wallet_no_transactions": "تراکنشی ثبت نشده است.",
     "wallet_last_transactions": "آخرین تراکنش‌ها:",
-    "wallet_transaction_line": "{date} | {amount} تومان | {description}",
+    "wallet_transaction_line": "{date} | {amount} ریال | {description}",
 
     # ====== تغییر تعداد توسط کارشناس ======
     "pending_requests": "📋 درخواست‌های در انتظار بررسی:",
