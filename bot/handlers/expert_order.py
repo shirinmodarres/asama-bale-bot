@@ -353,15 +353,18 @@ async def receive_order_quantity(message: Message, context: dict):
 
 # ====== دریافت کد رهگیری ======
 async def receive_order_tracking(message: Message, context: dict):
-    if not message.photos and not message.content:
+    if message.photos or not message.content:
         await message.reply(MESSAGES["order_tracking_required"], components=order_text_navigation_menu())
         return
     draft = context["order_draft"]
+    tracking_code = normalize_digits(message.content)
+    if not tracking_code.isdigit():
+        await message.reply(MESSAGES["order_tracking_required"], components=order_text_navigation_menu())
+        return
+    media = {"type": "text", "value": tracking_code, "file_id": None}
     if "edit_unit_index" in context:
         edit_unit_index = context.pop("edit_unit_index")
-        media = await _media_value(message, context, "tracking")
-        tracking_code = _tracking_text(media)
-        if tracking_code and (
+        if (
             _draft_has_tracking_code(draft, tracking_code, exclude_unit_index=edit_unit_index)
             or context["order_service"].tracking_code_exists(tracking_code)
         ):
@@ -374,9 +377,7 @@ async def receive_order_tracking(message: Message, context: dict):
         context["state"] = ORDER_SUMMARY
         return
     index = context["order_unit_index"]
-    media = await _media_value(message, context, "tracking")
-    tracking_code = _tracking_text(media)
-    if tracking_code and (
+    if (
         _draft_has_tracking_code(draft, tracking_code)
         or context["order_service"].tracking_code_exists(tracking_code)
     ):

@@ -7,6 +7,7 @@ from bot.data.statuses import (
     ORDER_PENDING_EXPERT_VALIDATION,
     ORDER_REJECTED_BY_EXPERT,
 )
+from bot.utils.normalize import normalize_digits
 
 
 def utc_now() -> str:
@@ -77,16 +78,32 @@ class OrderService:
         return order
 
     def tracking_code_exists(self, tracking_code: str) -> bool:
-        tracking_code = str(tracking_code).strip()
+        tracking_code = normalize_digits(tracking_code)
         if not tracking_code:
             return False
-        return self.collection.find_one(
+
+        exact_match = self.collection.find_one(
             {
                 "units.tracking_code.type": "text",
                 "units.tracking_code.value": tracking_code,
             },
             {"_id": 1},
-        ) is not None
+        )
+        if exact_match:
+            return True
+
+        orders = self.collection.find(
+            {"units.tracking_code.type": "text"},
+            {"_id": 0, "units.tracking_code": 1},
+        )
+        for order in orders:
+            for unit in order.get("units", []):
+                media = unit.get("tracking_code", {})
+                if media.get("type") != "text":
+                    continue
+                if normalize_digits(media.get("value") or "") == tracking_code:
+                    return True
+        return False
 
     def get_order(self, order_id: str):
         return self.collection.find_one(
