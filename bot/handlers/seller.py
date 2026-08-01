@@ -57,7 +57,7 @@ async def request_goods(message: Message, context: dict):
         await message.reply(MESSAGES["expert_inactive"])
         return
     context["items"] = []
-    await message.reply(MESSAGES["choose_category"], components=categories_keyboard())
+    await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="request"))
     context["state"] = CATEGORY
 
 
@@ -67,7 +67,7 @@ async def choose_category(callback: CallbackQuery, context: dict):
     context.setdefault("items", [])
     context["category_key"] = category_key
     context["category_name"] = CATEGORIES[category_key]["name"]
-    await callback.message.edit(MESSAGES["choose_product"], components=products_keyboard(category_key))
+    await callback.message.edit(MESSAGES["choose_product"], components=products_keyboard(category_key, navigation_prefix="request"))
     context["state"] = PRODUCT
 
 
@@ -122,7 +122,7 @@ async def receive_quantity(message: Message, context: dict):
 
 # ====== افزودن کالای دیگر ======
 async def add_item(message: Message, context: dict):
-    await message.reply(MESSAGES["choose_category"], components=categories_keyboard())
+    await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="request"))
     context["state"] = CATEGORY
 
 

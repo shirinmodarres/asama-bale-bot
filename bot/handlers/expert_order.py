@@ -74,8 +74,9 @@ def _format_media(value: dict) -> str:
     return value.get("value") or "-"
 
 
-def _summary(draft_or_order: dict) -> str:
+def _summary(draft_or_order: dict, units: list[dict] | None = None) -> str:
     seller_name = draft_or_order.get("seller_name", "-")
+    display_units = draft_or_order.get("units", []) if units is None else units
     lines = [
         MESSAGES["order_summary"],
         MESSAGES["order_summary_store"].format(
@@ -92,13 +93,29 @@ def _summary(draft_or_order: dict) -> str:
         "",
         MESSAGES["order_registered_info"],
     ]
-    for unit in draft_or_order.get("units", []):
+    for unit in display_units:
         lines.append(MESSAGES["order_summary_unit"].format(
             index=unit["index"],
             tracking=_format_media(unit["tracking_code"]),
             factor=_format_media(unit.get("factor_image") or {"type": "text", "value": "-", "file_id": None}),
         ))
     return "\n".join(lines)
+
+
+def _tracking_text(media: dict) -> str:
+    if media.get("type") != "text":
+        return ""
+    return normalize_digits(media.get("value") or "")
+
+
+def _draft_has_tracking_code(draft: dict, tracking_code: str, exclude_unit_index: int | None = None) -> bool:
+    tracking_code = normalize_digits(tracking_code)
+    for unit in draft.get("units", []):
+        if exclude_unit_index is not None and int(unit.get("index", 0)) == int(exclude_unit_index):
+            continue
+        if _tracking_text(unit.get("tracking_code", {})) == tracking_code:
+            return True
+    return False
 
 
 def _unit_status_label(status: str) -> str:
@@ -341,13 +358,31 @@ async def receive_order_tracking(message: Message, context: dict):
         return
     draft = context["order_draft"]
     if "edit_unit_index" in context:
-        unit = draft["units"][context.pop("edit_unit_index") - 1]
-        unit["tracking_code"] = await _media_value(message, context, "tracking")
+        edit_unit_index = context.pop("edit_unit_index")
+        media = await _media_value(message, context, "tracking")
+        tracking_code = _tracking_text(media)
+        if tracking_code and (
+            _draft_has_tracking_code(draft, tracking_code, exclude_unit_index=edit_unit_index)
+            or context["order_service"].tracking_code_exists(tracking_code)
+        ):
+            context["edit_unit_index"] = edit_unit_index
+            await message.reply(MESSAGES["order_duplicate_tracking"], components=order_text_navigation_menu())
+            return
+        unit = draft["units"][edit_unit_index - 1]
+        unit["tracking_code"] = media
         await message.reply(_summary(draft), components=order_validation_inline_keyboard())
         context["state"] = ORDER_SUMMARY
         return
     index = context["order_unit_index"]
-    context["pending_unit_tracking"] = await _media_value(message, context, "tracking")
+    media = await _media_value(message, context, "tracking")
+    tracking_code = _tracking_text(media)
+    if tracking_code and (
+        _draft_has_tracking_code(draft, tracking_code)
+        or context["order_service"].tracking_code_exists(tracking_code)
+    ):
+        await message.reply(MESSAGES["order_duplicate_tracking"], components=order_text_navigation_menu())
+        return
+    context["pending_unit_tracking"] = media
     await message.reply(
         MESSAGES["order_ask_factor"].format(index=index, total=draft["quantity"]),
         components=order_text_navigation_menu(),
@@ -547,10 +582,15 @@ async def pending_orders(message: Message, context: dict):
         return
     await message.reply(MESSAGES["order_pending_list"])
     for order in orders:
-        await message.reply(_summary(order))
-        for unit in order.get("units", []):
-            if unit.get("validation_status", "pending") != "pending":
-                continue
+        pending_units = [
+            unit
+            for unit in order.get("units", [])
+            if unit.get("validation_status", "pending") == "pending"
+        ]
+        if not pending_units:
+            continue
+        await message.reply(_summary(order, units=pending_units))
+        for unit in pending_units:
             factor = unit.get("factor_image", {})
             tracking = unit.get("tracking_code", {})
             tracking_file = _photo_input_file(tracking)

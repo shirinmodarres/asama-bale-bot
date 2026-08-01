@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from pathlib import Path
 
 from bot.data.statuses import (
     ORDER_APPROVED_BY_EXPERT,
@@ -10,6 +11,14 @@ from bot.data.statuses import (
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+ORDER_PHOTO_DIR = Path("data/uploads/orders")
+
+
+def _safe_path_part(value: str) -> str:
+    text = str(value or "").strip()
+    return "".join(char if char not in '/\\:*?"<>|' else "-" for char in text) or "-"
 
 
 class OrderService:
@@ -59,11 +68,25 @@ class OrderService:
             "updated_at": now,
         }
 
+        self._organize_order_photos(order)
+
         self.collection.insert_one(order)
 
         order.pop("_id", None)
 
         return order
+
+    def tracking_code_exists(self, tracking_code: str) -> bool:
+        tracking_code = str(tracking_code).strip()
+        if not tracking_code:
+            return False
+        return self.collection.find_one(
+            {
+                "units.tracking_code.type": "text",
+                "units.tracking_code.value": tracking_code,
+            },
+            {"_id": 1},
+        ) is not None
 
     def get_order(self, order_id: str):
         return self.collection.find_one(
@@ -273,6 +296,31 @@ class OrderService:
         normalized.setdefault("rejection_reason_key", None)
         normalized.setdefault("rejection_reason_text", None)
         return normalized
+
+    def _organize_order_photos(self, order: dict) -> None:
+        store_folder = _safe_path_part(f"{order.get('store_code', '')}-{order.get('store_name', '')}")
+        order_folder = ORDER_PHOTO_DIR / store_folder / _safe_path_part(order["id"])
+        for unit in order.get("units", []):
+            self._move_media_file(order_folder, unit, "tracking_code")
+            self._move_media_file(order_folder, unit, "factor_image")
+
+    @staticmethod
+    def _move_media_file(order_folder: Path, unit: dict, media_key: str) -> None:
+        media = unit.get(media_key)
+        if not media or media.get("type") != "photo" or not media.get("local_path"):
+            return
+        source = Path(media["local_path"])
+        if not source.is_file():
+            return
+        order_folder.mkdir(parents=True, exist_ok=True)
+        suffix = source.suffix or ".jpg"
+        target = order_folder / f"unit-{unit.get('index')}-{media_key}{suffix}"
+        counter = 1
+        while target.exists():
+            target = order_folder / f"unit-{unit.get('index')}-{media_key}-{counter}{suffix}"
+            counter += 1
+        source.replace(target)
+        media["local_path"] = str(target)
 
     def _calculate_order_status(
         self,

@@ -56,6 +56,7 @@ from bot.utils.keyboards import (
     admin_bot_menu,
     admin_action_requests_keyboard,
     admin_action_request_detail_keyboard,
+    categories_keyboard,
     product_status_keyboard,
     stores_keyboard,
     experts_keyboard,
@@ -416,6 +417,17 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
             await cancel_order(callback.message, context)
         else:
             await back_order(callback.message, context)
+        return
+
+    if data.startswith("request_nav:"):
+        if current_state == PRODUCT:
+            await callback.message.edit(
+                MESSAGES["choose_category"],
+                components=categories_keyboard(navigation_prefix="request"),
+            )
+            context["state"] = CATEGORY
+        else:
+            await cancel_request(callback.message, context)
         return
 
     # ====== جریان درخواست کالا ======

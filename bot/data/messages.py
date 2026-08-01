@@ -119,6 +119,7 @@ MESSAGES = {
     "order_ask_factor": "لطفاً عکس فاکتور کالای شماره {index} از {total} را ارسال کنید.",
     "order_factor_photo_required": "❌ لطفاً عکس فاکتور را ارسال کنید، نه متن.",  # کلید جدید
     "order_tracking_required": "❌ کد رهگیری را به‌صورت متن یا عکس ارسال کنید.",
+    "order_duplicate_tracking": "⚠️ این کد رهگیری قبلاً ثبت شده است. لطفاً کد رهگیری دیگری وارد کنید.",
     "order_summary": "🧾 خلاصه سفارش کالا:",
     "order_summary_store": "🏬 فروشگاه: {store_code} - {store_name}",
     "order_summary_seller": "👤 فروشنده: {seller_name}",

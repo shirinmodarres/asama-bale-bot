@@ -54,8 +54,8 @@ BTN_DISABLE = "خاموش"
 
 def seller_main_menu():
     markup = MenuKeyboardMarkup()
-    markup.add(MenuKeyboardButton(BTN_REQUEST_GOODS), row=1)
-    markup.add(MenuKeyboardButton(BTN_CREATE_ORDER), row=2)
+    markup.add(MenuKeyboardButton(BTN_CREATE_ORDER), row=1)
+    markup.add(MenuKeyboardButton(BTN_REQUEST_GOODS), row=2)
     markup.add(MenuKeyboardButton(BTN_MY_REQUESTS), row=3)
     markup.add(MenuKeyboardButton(BTN_WALLET), row=4)
     return markup
@@ -376,6 +376,7 @@ def order_units_keyboard(units: list[dict]):
             ),
             row=idx
         )
+    markup.add(InlineKeyboardButton(BTN_BACK, callback_data="order_back"), row=len(units) + 1)
     return markup
 
 
@@ -383,6 +384,7 @@ def order_unit_field_keyboard(unit_index: int):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("کد رهگیری", callback_data=f"order_edit_tracking:{unit_index}"), row=1)
     markup.add(InlineKeyboardButton("عکس فاکتور", callback_data=f"order_edit_factor:{unit_index}"), row=2)
+    markup.add(InlineKeyboardButton(BTN_BACK, callback_data="order_back"), row=3)
     return markup
 
 
