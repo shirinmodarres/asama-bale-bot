@@ -19,7 +19,7 @@ from bot.utils.keyboards import (
     seller_main_menu,
 )
 from bot.utils.normalize import normalize_digits
-from data.static_data import STORES, expert_store_codes, get_expert_for_store, get_role
+from data.static_data import expert_store_codes, get_expert_for_store, get_role, get_store
 
 logger = logging.getLogger(__name__)
 
@@ -284,7 +284,7 @@ async def order_start(message: Message, context: dict):
     if not seller or seller.get("status") != ACTIVE:
         await message.reply(MESSAGES["order_start_not_seller"])
         return
-    store = STORES.get(seller["store_code"])
+    store = get_store(seller["store_code"])
     if not store:
         await message.reply(MESSAGES["order_no_store"])
         return

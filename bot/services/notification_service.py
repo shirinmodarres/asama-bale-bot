@@ -3,13 +3,13 @@ import logging
 from bot.data.messages import MESSAGES
 from bot.data.statuses import status_label
 from bot.utils.keyboards import approval_keyboard, request_review_keyboard
-from data.static_data import SALES_EXPERTS, STORES
+from data.static_data import get_sales_experts, get_store
 
 logger = logging.getLogger(__name__)
 
 
 def format_request(request: dict, title: str) -> str:
-    store = STORES.get(request["store_code"], {})
+    store = get_store(request["store_code"]) or {}
     lines = [
         title,
         f"شماره درخواست: {request['id']}",
@@ -30,7 +30,7 @@ def format_request(request: dict, title: str) -> str:
 
 
 async def notify_seller_approval(context: dict, expert: dict, seller: dict, store_code: str) -> None:
-    store = STORES[store_code]
+    store = get_store(store_code) or {"name": ""}
     text = (
         f"{MESSAGES['seller_approval_request']}\n"
         f"فروشگاه: {store_code} - {store['name']}\n"
@@ -53,8 +53,8 @@ async def notify_expert_request(context: dict, expert: dict, request: dict) -> N
 
 
 async def notify_manager_decision(context: dict, request: dict, approved: bool) -> None:
-    store = STORES.get(request["store_code"], {})
-    expert = SALES_EXPERTS.get(store.get("expert_key"))
+    store = get_store(request["store_code"]) or {}
+    expert = get_sales_experts().get(store.get("expert_key"))
     if approved:
         seller_text = MESSAGES["manager_approved_request"]
         expert_text = f"{MESSAGES['manager_approved_for_expert']}\nشماره درخواست: {request['id']}"

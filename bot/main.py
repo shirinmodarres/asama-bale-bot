@@ -62,7 +62,7 @@ from bot.utils.keyboards import (
     stores_keyboard,
     experts_keyboard,
 )
-from data.static_data import get_role, SALES_MANAGER
+from data.static_data import get_role, get_sales_manager
 
 
 # ====== جریان درخواست کالا (seller) ======
@@ -250,7 +250,7 @@ async def handle_text(message: Message, context: dict):
             await message.reply(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
                 await context["bot"].send_message(
-                    SALES_MANAGER["telegram_id"],
+                    get_sales_manager()["telegram_id"],
                     MESSAGES["admin_action_request_detail"].format(
                         title=request["title"],
                         status=request["status"],
@@ -275,7 +275,7 @@ async def handle_text(message: Message, context: dict):
             await message.reply(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
                 await context["bot"].send_message(
-                    SALES_MANAGER["telegram_id"],
+                    get_sales_manager()["telegram_id"],
                     MESSAGES["admin_action_request_detail"].format(
                         title=request["title"],
                         status=request["status"],

@@ -9,7 +9,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from bot.data.statuses import order_status_label, status_label
 from bot.utils.datetime_format import format_shamsi_datetime
-from data.static_data import SALES_EXPERTS, STORES
+from data.static_data import get_sales_experts, get_store
 
 
 def _unit_status_label(status: str) -> str:
@@ -130,8 +130,8 @@ class ExcelService:
         sheet.append(self.REQUEST_HEADERS_FA)
 
         for request in requests:
-            store = STORES.get(request["store_code"], {})
-            expert = SALES_EXPERTS.get(store.get("expert_key"), {})
+            store = get_store(request["store_code"]) or {}
+            expert = get_sales_experts().get(store.get("expert_key"), {})
             items_text = "\n".join(
                 f"{item['category_name']} / {item.get('product_name', '')} / مدل {item['product_model']} / {item['carton_quantity']} کارتن"
                 for item in request["items"]

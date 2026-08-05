@@ -2,27 +2,39 @@
 
 Simple Python Bale bot MVP for the Atka sales goods request and seller product order flows.
 
-Static data is manually maintained in one file, and runtime data is stored in MongoDB.
+Runtime data and organization data are stored in MongoDB. `data/static_data.py`
+is only a fallback when Mongo collections are empty or unavailable.
 
 ## Structure
 
 - `bot/main.py` - application setup and handler registration.
 - `bot/config.py` - environment config.
 - `bot/handlers/` - start, seller, expert, manager, and admin command/callback handlers.
-- `bot/services/` - user/request/order Mongo storage, Excel export, and notifications.
+- `bot/services/` - user/request/order/product Mongo storage, Excel export, and notifications.
 - `bot/utils/` - keyboards and helpers.
-- `data/static_data.py` - single source of truth for stores, categories, products, experts, manager, and admin.
+- `data/static_data.py` - fallback data for stores, products, experts, manager, and admin.
 - `sefareshbot.py` - run wrapper.
 
-## Static Data
+## Mongo Data
 
-Edit `data/static_data.py` before running:
+These collections are read from MongoDB:
 
-- `SYSTEM_MANAGER`
-- `SALES_MANAGER`
-- `SALES_EXPERTS`
-- `STORES`
-- `CATEGORIES`
+- `admins`
+- `sales_managers`
+- `sales_experts`
+- `stores`
+- `products`
+
+`data/static_data.py` remains as a safe fallback only.
+
+Seed organization data into MongoDB:
+
+```bash
+APP_ENV=local .venv/bin/python scripts/seed_org_data.py
+APP_ENV=production .venv/bin/python scripts/seed_org_data.py
+```
+
+Use `--replace` only when you want to delete and recreate the org collections.
 
 Each product has a `price` in rials. Set the real value before accepting
 orders; approving each order unit credits 4% of its snapshotted product price
@@ -77,7 +89,7 @@ or:
 ## Product Orders
 
 Approved sellers create product orders from `ثبت سفارش کالا`.
-The seller store is taken from `data/users.json`; sellers cannot choose another store.
-Quantity means individual product units. For each unit, the bot collects one serial and one tracking code as text or photo.
+The seller store is taken from the Mongo `users` collection; sellers cannot choose another store.
+Quantity means individual product units. For each unit, the bot collects one numeric tracking code and one factor photo.
 Orders are saved with `pending_expert_validation` and sent to the assigned expert.
 Experts can only validate orders for their assigned stores.

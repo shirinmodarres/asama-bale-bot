@@ -9,7 +9,7 @@ from bot.data.statuses import (
     REJECTED_BY_EXPERT,
     REJECTED_BY_MANAGER,
 )
-from data.static_data import STORES
+from data.static_data import get_store
 
 
 def utc_now() -> str:
@@ -43,7 +43,7 @@ class RequestService:
         request = {
             "id": next_id,
             "store_code": seller["store_code"],
-            "store_name": STORES.get(str(seller["store_code"]), {}).get("name", ""),
+            "store_name": (get_store(str(seller["store_code"])) or {}).get("name", ""),
             "seller_telegram_id": seller["telegram_id"],
             "seller_full_name": seller["full_name"],
             "seller_phone": seller["phone"],

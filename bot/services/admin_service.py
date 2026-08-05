@@ -2,7 +2,7 @@ from datetime import datetime
 
 from bot.utils.mongo import get_database
 from bot.services.product_service import ProductCatalogService
-from data.static_data import BOT_ACTIVE, SALES_EXPERTS, STORES
+from data.static_data import BOT_ACTIVE, clear_org_cache, get_sales_experts, get_stores
 
 PENDING = "pending"
 APPROVED = "approved"
@@ -48,8 +48,9 @@ class AdminService:
 
     def list_stores(self) -> list[dict]:
         stores = []
+        all_stores = get_stores()
 
-        for code in sorted(STORES.keys(), key=lambda item: int(item)):
+        for code in sorted(all_stores.keys(), key=lambda item: int(item)):
             store = self.get_store(code)
             if store:
                 stores.append(store)
@@ -59,7 +60,7 @@ class AdminService:
     def get_store(self, code: str) -> dict | None:
         code = str(code).strip()
 
-        store = STORES.get(code)
+        store = get_stores().get(code)
 
         if not store:
             return None
@@ -82,19 +83,22 @@ class AdminService:
     def set_store_active(self, code: str, active: bool) -> bool:
         code = str(code).strip()
 
-        if code not in STORES:
+        if code not in get_stores():
             return False
 
-        self.db["admin_store_status"].update_one(
-            {"_id": code},
+        self.db["stores"].update_one(
+            {"code": code},
             {
                 "$set": {
+                    "code": code,
                     "active": bool(active),
+                    "is_active": bool(active),
                     "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
                 }
             },
             upsert=True,
         )
+        clear_org_cache()
 
         return True
 
@@ -104,8 +108,9 @@ class AdminService:
 
     def list_experts(self) -> list[dict]:
         experts = []
+        sales_experts = get_sales_experts()
 
-        for key in sorted(SALES_EXPERTS.keys()):
+        for key in sorted(sales_experts.keys()):
             expert = self.get_expert(key)
             if expert:
                 experts.append(expert)
@@ -113,7 +118,7 @@ class AdminService:
         return experts
 
     def get_expert(self, expert_key: str) -> dict | None:
-        expert = SALES_EXPERTS.get(expert_key)
+        expert = get_sales_experts().get(expert_key)
 
         if not expert:
             return None
@@ -135,19 +140,22 @@ class AdminService:
         return result
 
     def set_expert_active(self, expert_key: str, active: bool) -> bool:
-        if expert_key not in SALES_EXPERTS:
+        if expert_key not in get_sales_experts():
             return False
 
-        self.db["admin_expert_status"].update_one(
-            {"_id": expert_key},
+        self.db["sales_experts"].update_one(
+            {"expert_key": expert_key},
             {
                 "$set": {
+                    "expert_key": expert_key,
                     "active": bool(active),
+                    "is_active": bool(active),
                     "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
                 }
             },
             upsert=True,
         )
+        clear_org_cache()
 
         return True
 

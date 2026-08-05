@@ -5,6 +5,8 @@ Edit Telegram IDs, stores, experts, manager/admin, categories, and products here
 Do not hardcode this data inside handlers.
 """
 import os
+from copy import deepcopy
+from datetime import datetime, timedelta
 
 try:
     from dotenv import load_dotenv
@@ -13,6 +15,10 @@ except ImportError:
 
 if load_dotenv:
     load_dotenv()
+
+ORG_CACHE_TTL = timedelta(seconds=60)
+_ORG_CACHE = None
+_ORG_CACHE_UNTIL = None
 
 ADMINS = [
     {"telegram_id": 700144333, "full_name": "Amir Kamali"}, 
@@ -191,39 +197,149 @@ if APP_ENV == "local":
     STORES = LOCAL_STORES
 
 
+def _fallback_org_data() -> dict:
+    return {
+        "admins": deepcopy(ADMINS),
+        "sales_manager": deepcopy(SALES_MANAGER),
+        "sales_experts": deepcopy(SALES_EXPERTS),
+        "stores": deepcopy(STORES),
+    }
+
+
+def _active_flag(document: dict) -> bool:
+    return bool(document.get("is_active", document.get("active", True)))
+
+
+def _load_org_data_from_mongo() -> dict:
+    try:
+        from bot.utils.mongo import get_database
+
+        db = get_database()
+        admins = [
+            {
+                "telegram_id": int(item["telegram_id"]),
+                "full_name": item.get("full_name", ""),
+                "active": _active_flag(item),
+            }
+            for item in db["admins"].find({})
+            if item.get("telegram_id") is not None and _active_flag(item)
+        ]
+
+        managers = [
+            item
+            for item in db["sales_managers"].find({})
+            if item.get("telegram_id") is not None and _active_flag(item)
+        ]
+
+        sales_experts = {
+            str(item.get("expert_key") or item.get("key")): {
+                "telegram_id": int(item["telegram_id"]),
+                "full_name": item.get("full_name", ""),
+                "active": _active_flag(item),
+            }
+            for item in db["sales_experts"].find({})
+            if (item.get("expert_key") or item.get("key")) and item.get("telegram_id") is not None
+        }
+
+        stores = {
+            str(item.get("code") or item.get("store_code")): {
+                "code": str(item.get("code") or item.get("store_code")),
+                "name": item.get("name") or item.get("store_name", ""),
+                "expert_key": item.get("expert_key", ""),
+                "active": _active_flag(item),
+            }
+            for item in db["stores"].find({})
+            if item.get("code") or item.get("store_code")
+        }
+    except Exception:
+        return {}
+
+    if not admins or not managers or not sales_experts or not stores:
+        return {}
+
+    manager = managers[0]
+    return {
+        "admins": admins,
+        "sales_manager": {
+            "telegram_id": int(manager["telegram_id"]),
+            "full_name": manager.get("full_name", ""),
+            "active": _active_flag(manager),
+        },
+        "sales_experts": sales_experts,
+        "stores": stores,
+    }
+
+
+def _org_data() -> dict:
+    global _ORG_CACHE, _ORG_CACHE_UNTIL
+
+    now = datetime.utcnow()
+    if _ORG_CACHE is not None and _ORG_CACHE_UNTIL and now < _ORG_CACHE_UNTIL:
+        return deepcopy(_ORG_CACHE)
+
+    data = _load_org_data_from_mongo() or _fallback_org_data()
+    _ORG_CACHE = data
+    _ORG_CACHE_UNTIL = now + ORG_CACHE_TTL
+    return deepcopy(data)
+
+
+def clear_org_cache() -> None:
+    global _ORG_CACHE, _ORG_CACHE_UNTIL
+    _ORG_CACHE = None
+    _ORG_CACHE_UNTIL = None
+
+
+def get_stores() -> dict:
+    return _org_data()["stores"]
+
+
+def get_sales_experts() -> dict:
+    return _org_data()["sales_experts"]
+
+
+def get_sales_manager() -> dict:
+    return _org_data()["sales_manager"]
+
+
 def get_store(code: str):
-    return STORES.get(str(code).strip())
+    return get_stores().get(str(code).strip())
 
 
 def get_expert_for_store(store_code: str):
     store = get_store(store_code)
     if not store:
         return None
-    return SALES_EXPERTS.get(store["expert_key"])
+    return get_sales_experts().get(store["expert_key"])
 
 
 def get_role(telegram_id: int) -> str | None:
-    if any(admin["telegram_id"] == telegram_id for admin in ADMINS):
+    telegram_id = int(telegram_id)
+    admins = get_admins()
+    sales_manager = get_sales_manager()
+    sales_experts = get_sales_experts()
+    if any(int(admin["telegram_id"]) == telegram_id for admin in admins):
         return "admin"
-    if telegram_id == SALES_MANAGER["telegram_id"]:
+    if telegram_id == int(sales_manager["telegram_id"]):
         return "sales_manager"
-    for expert in SALES_EXPERTS.values():
-        if telegram_id == expert["telegram_id"]:
+    for expert in sales_experts.values():
+        if telegram_id == int(expert["telegram_id"]):
             return "expert"
     return None
 
 
 def is_admin(telegram_id: int) -> bool:
-    return any(admin["telegram_id"] == telegram_id for admin in ADMINS)
+    telegram_id = int(telegram_id)
+    return any(int(admin["telegram_id"]) == telegram_id for admin in get_admins())
 
 
 def get_admins() -> list[dict]:
-    return ADMINS
+    return _org_data()["admins"]
 
 
 def get_expert_key_by_telegram_id(telegram_id: int) -> str | None:
-    for key, expert in SALES_EXPERTS.items():
-        if telegram_id == expert["telegram_id"]:
+    telegram_id = int(telegram_id)
+    for key, expert in get_sales_experts().items():
+        if telegram_id == int(expert["telegram_id"]):
             return key
     return None
 
@@ -232,4 +348,4 @@ def expert_store_codes(telegram_id: int) -> set[str]:
     expert_key = get_expert_key_by_telegram_id(telegram_id)
     if not expert_key:
         return set()
-    return {code for code, store in STORES.items() if store["expert_key"] == expert_key}
+    return {code for code, store in get_stores().items() if store["expert_key"] == expert_key}
