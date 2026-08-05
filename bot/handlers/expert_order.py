@@ -19,7 +19,7 @@ from bot.utils.keyboards import (
     seller_main_menu,
 )
 from bot.utils.normalize import normalize_digits
-from data.static_data import CATEGORIES, STORES, expert_store_codes, get_expert_for_store, get_role
+from data.static_data import STORES, expert_store_codes, get_expert_for_store, get_role
 
 logger = logging.getLogger(__name__)
 
@@ -301,17 +301,26 @@ async def order_start(message: Message, context: dict):
         "expert_telegram_id": expert["telegram_id"],
         "expert_name": expert["full_name"],
     }
-    await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="order"))
+    context["categories"] = context["product_service"].get_categories()
+    await message.reply(
+        MESSAGES["choose_category"],
+        components=categories_keyboard(context["categories"], navigation_prefix="order"),
+    )
     context["state"] = ORDER_CATEGORY
 
 
 # ====== انتخاب دسته‌بندی ======
 async def choose_order_category(callback: CallbackQuery, context: dict):
     category_key = callback.data.split(":", 1)[1]
+    categories = context["product_service"].get_categories()
+    context["categories"] = categories
     draft = context["order_draft"]
     draft["category_key"] = category_key
-    draft["category_name"] = CATEGORIES[category_key]["name"]
-    await callback.message.edit(MESSAGES["choose_product"], components=products_keyboard(category_key, navigation_prefix="order"))
+    draft["category_name"] = categories[category_key]["name"]
+    await callback.message.edit(
+        MESSAGES["choose_product"],
+        components=products_keyboard(categories, category_key, navigation_prefix="order"),
+    )
     context["state"] = ORDER_PRODUCT
 
 
@@ -319,7 +328,8 @@ async def choose_order_category(callback: CallbackQuery, context: dict):
 async def choose_order_product(callback: CallbackQuery, context: dict):
     product_key = callback.data.split(":", 1)[1]
     draft = context["order_draft"]
-    product = CATEGORIES[draft["category_key"]]["products"][product_key]
+    categories = context.get("categories") or context["product_service"].get_categories()
+    product = categories[draft["category_key"]]["products"][product_key]
     draft["product_key"] = product_key
     draft["product_name"] = product["name"]
     draft["product_model"] = product["model"]
@@ -504,13 +514,19 @@ async def back_order(message: Message, context: dict):
         await cancel_order(message, context)
         return
     if state == ORDER_PRODUCT:
-        await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="order"))
+        categories = context["product_service"].get_categories()
+        context["categories"] = categories
+        await message.reply(
+            MESSAGES["choose_category"],
+            components=categories_keyboard(categories, navigation_prefix="order"),
+        )
         context["state"] = ORDER_CATEGORY
         return
     if state == ORDER_QUANTITY:
+        categories = context.get("categories") or context["product_service"].get_categories()
         await message.reply(
             MESSAGES["choose_product"],
-            components=products_keyboard(draft["category_key"], navigation_prefix="order"),
+            components=products_keyboard(categories, draft["category_key"], navigation_prefix="order"),
         )
         context["state"] = ORDER_PRODUCT
         return

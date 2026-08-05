@@ -1,7 +1,8 @@
 from datetime import datetime
 
 from bot.utils.mongo import get_database
-from data.static_data import BOT_ACTIVE, CATEGORIES, SALES_EXPERTS, STORES
+from bot.services.product_service import ProductCatalogService
+from data.static_data import BOT_ACTIVE, SALES_EXPERTS, STORES
 
 PENDING = "pending"
 APPROVED = "approved"
@@ -9,11 +10,12 @@ REJECTED = "rejected"
 
 
 class AdminService:
-    def __init__(self, db=None):
-        self.db = db or get_database()
+    def __init__(self, db=None, product_catalog: ProductCatalogService | None = None):
+        self.db = db if db is not None else get_database()
 
         self.settings = self.db["admin_settings"]
         self.action_requests = self.db["admin_action_requests"]
+        self.product_catalog = product_catalog if product_catalog is not None else ProductCatalogService(self.db)
 
         # ایجاد تنظیمات اولیه در صورت نبودن
         if self.settings.find_one({"_id": "main"}) is None:
@@ -154,23 +156,7 @@ class AdminService:
     # =========================
 
     def list_products(self, active: bool | None = None) -> list[dict]:
-        products = []
-
-        for category_key, category in CATEGORIES.items():
-            for product_key in category["products"].keys():
-
-                item = self.get_product(
-                    category_key,
-                    product_key,
-                )
-
-                if item is None:
-                    continue
-
-                if active is None or item["active"] == active:
-                    products.append(item)
-
-        return products
+        return self.product_catalog.list_products(active=active)
 
     def get_product(
         self,
@@ -178,36 +164,7 @@ class AdminService:
         product_key: str,
     ) -> dict | None:
 
-        category = CATEGORIES.get(category_key)
-
-        if not category:
-            return None
-
-        product = category["products"].get(product_key)
-
-        if not product:
-            return None
-
-        status_id = f"{category_key}:{product_key}"
-
-        status = self.db["admin_product_status"].find_one({
-            "_id": status_id
-        })
-
-        active = (
-            status.get("active")
-            if status is not None
-            else product.get("active", True)
-        )
-
-        result = dict(product)
-
-        result["category_key"] = category_key
-        result["category_name"] = category["name"]
-        result["product_key"] = product_key
-        result["active"] = active
-
-        return result
+        return self.product_catalog.get_product(category_key, product_key)
 
     def set_product_active(
         self,
@@ -216,30 +173,7 @@ class AdminService:
         active: bool,
     ) -> bool:
 
-        category = CATEGORIES.get(category_key)
-
-        if not category:
-            return False
-
-        if product_key not in category["products"]:
-            return False
-
-        status_id = f"{category_key}:{product_key}"
-
-        self.db["admin_product_status"].update_one(
-            {"_id": status_id},
-            {
-                "$set": {
-                    "category_key": category_key,
-                    "product_key": product_key,
-                    "active": bool(active),
-                    "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
-                }
-            },
-            upsert=True,
-        )
-
-        return True
+        return self.product_catalog.set_product_active(category_key, product_key, active)
 
     # =========================
     # Admin Action Requests

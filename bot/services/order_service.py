@@ -84,8 +84,13 @@ class OrderService:
 
         exact_match = self.collection.find_one(
             {
-                "units.tracking_code.type": "text",
-                "units.tracking_code.value": tracking_code,
+                "units": {
+                    "$elemMatch": {
+                        "validation_status": "approved",
+                        "tracking_code.type": "text",
+                        "tracking_code.value": tracking_code,
+                    }
+                }
             },
             {"_id": 1},
         )
@@ -93,11 +98,13 @@ class OrderService:
             return True
 
         orders = self.collection.find(
-            {"units.tracking_code.type": "text"},
-            {"_id": 0, "units.tracking_code": 1},
+            {"units.validation_status": "approved", "units.tracking_code.type": "text"},
+            {"_id": 0, "units.tracking_code": 1, "units.validation_status": 1},
         )
         for order in orders:
             for unit in order.get("units", []):
+                if unit.get("validation_status") != "approved":
+                    continue
                 media = unit.get("tracking_code", {})
                 if media.get("type") != "text":
                     continue

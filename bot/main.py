@@ -13,6 +13,7 @@ from bot.services.user_service import UserService
 from bot.services.request_service import RequestService
 from bot.services.order_service import OrderService
 from bot.services.admin_service import AdminService
+from bot.services.product_service import ProductCatalogService
 from bot.data.messages import MESSAGES
 from bot.utils.keyboards import (
     BTN_REQUEST_GOODS,
@@ -421,9 +422,10 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
 
     if data.startswith("request_nav:"):
         if current_state == PRODUCT:
+            context["categories"] = context["product_service"].get_categories()
             await callback.message.edit(
                 MESSAGES["choose_category"],
-                components=categories_keyboard(navigation_prefix="request"),
+                components=categories_keyboard(context["categories"], navigation_prefix="request"),
             )
             context["state"] = CATEGORY
         else:
@@ -513,11 +515,14 @@ def build_bot():
 
     db = get_database()
 
+    product_service = ProductCatalogService(db)
+
     shared_services = {
         "user_service": UserService(db),
         "request_service": RequestService(db),
         "order_service": OrderService(db),
-        "admin_service": AdminService(),
+        "product_service": product_service,
+        "admin_service": AdminService(db, product_catalog=product_service),
         "bot": client,
     }
 

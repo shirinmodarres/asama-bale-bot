@@ -21,7 +21,7 @@ from bot.utils.keyboards import (
 )
 from bot.utils.datetime_format import format_shamsi_datetime
 from bot.utils.normalize import normalize_digits
-from data.static_data import CATEGORIES, get_expert_for_store, get_store
+from data.static_data import get_expert_for_store, get_store
 
 # ====== Stateهای مستقل برای درخواست کالا ======
 CATEGORY, PRODUCT, QUANTITY, SUMMARY, EDIT_ITEM, EDIT_QUANTITY, REMOVE_ITEM = range(10, 17)
@@ -57,17 +57,26 @@ async def request_goods(message: Message, context: dict):
         await message.reply(MESSAGES["expert_inactive"])
         return
     context["items"] = []
-    await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="request"))
+    context["categories"] = context["product_service"].get_categories()
+    await message.reply(
+        MESSAGES["choose_category"],
+        components=categories_keyboard(context["categories"], navigation_prefix="request"),
+    )
     context["state"] = CATEGORY
 
 
 # ====== انتخاب دسته‌بندی ======
 async def choose_category(callback: CallbackQuery, context: dict):
     category_key = callback.data.split(":", 1)[1]
+    categories = context["product_service"].get_categories()
+    context["categories"] = categories
     context.setdefault("items", [])
     context["category_key"] = category_key
-    context["category_name"] = CATEGORIES[category_key]["name"]
-    await callback.message.edit(MESSAGES["choose_product"], components=products_keyboard(category_key, navigation_prefix="request"))
+    context["category_name"] = categories[category_key]["name"]
+    await callback.message.edit(
+        MESSAGES["choose_product"],
+        components=products_keyboard(categories, category_key, navigation_prefix="request"),
+    )
     context["state"] = PRODUCT
 
 
@@ -75,11 +84,12 @@ async def choose_category(callback: CallbackQuery, context: dict):
 async def choose_product(callback: CallbackQuery, context: dict):
     product_key = callback.data.split(":", 1)[1]
     category_key = context.get("category_key")
-    if not category_key or category_key not in CATEGORIES:
+    categories = context.get("categories") or context["product_service"].get_categories()
+    if not category_key or category_key not in categories:
         await callback.message.edit(MESSAGES.get("stale_button", "این دکمه منقضی شده، لطفاً دوباره «درخواست کالا» را بزنید."))
         return
     context.setdefault("items", [])
-    product = CATEGORIES[category_key]["products"][product_key]
+    product = categories[category_key]["products"][product_key]
     context["product_key"] = product_key
     context["product_name"] = product["name"]
     context["product_model"] = product["model"]
@@ -122,7 +132,11 @@ async def receive_quantity(message: Message, context: dict):
 
 # ====== افزودن کالای دیگر ======
 async def add_item(message: Message, context: dict):
-    await message.reply(MESSAGES["choose_category"], components=categories_keyboard(navigation_prefix="request"))
+    context["categories"] = context["product_service"].get_categories()
+    await message.reply(
+        MESSAGES["choose_category"],
+        components=categories_keyboard(context["categories"], navigation_prefix="request"),
+    )
     context["state"] = CATEGORY
 
 
@@ -172,7 +186,11 @@ async def remove_item(callback: CallbackQuery, context: dict):
     request_service.remove_draft_item(context["items"], index)
     if not context["items"]:
         await callback.message.edit(MESSAGES["no_items_left"])
-        await callback.message.reply(MESSAGES["choose_category"], components=categories_keyboard())
+        context["categories"] = context["product_service"].get_categories()
+        await callback.message.reply(
+            MESSAGES["choose_category"],
+            components=categories_keyboard(context["categories"], navigation_prefix="request"),
+        )
         context["state"] = CATEGORY
         return
     await callback.message.edit(MESSAGES["item_removed"])

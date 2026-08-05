@@ -1,7 +1,6 @@
 from bale import InlineKeyboardButton, InlineKeyboardMarkup, MenuKeyboardMarkup, MenuKeyboardButton
 
 from bot.data.messages import MESSAGES
-from data.static_data import CATEGORIES
 
 # ============================================================
 # ثابت‌های متنی (همان‌طور که در هندلرها استفاده می‌شوند)
@@ -146,10 +145,10 @@ def summary_menu():
 # InlineKeyboard (کیبوردهای اینلاین)
 # ============================================================
 
-def categories_keyboard(include_inactive_products: bool = False, navigation_prefix: str | None = None):
+def categories_keyboard(categories: dict, include_inactive_products: bool = False, navigation_prefix: str | None = None):
     markup = InlineKeyboardMarkup()
     row = 1
-    for category_key, category in CATEGORIES.items():
+    for category_key, category in categories.items():
         products = category.get("products", {})
         if not include_inactive_products:
             products = {k: v for k, v in products.items() if v.get("active", True)}
@@ -162,8 +161,8 @@ def categories_keyboard(include_inactive_products: bool = False, navigation_pref
     return markup
 
 
-def products_keyboard(category_key: str, include_inactive: bool = False, navigation_prefix: str | None = None):
-    products = CATEGORIES[category_key]["products"]
+def products_keyboard(categories: dict, category_key: str, include_inactive: bool = False, navigation_prefix: str | None = None):
+    products = categories[category_key]["products"]
     if not include_inactive:
         products = {k: v for k, v in products.items() if v.get("active", True)}
     markup = InlineKeyboardMarkup()

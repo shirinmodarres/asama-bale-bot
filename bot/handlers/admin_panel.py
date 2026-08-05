@@ -17,7 +17,7 @@ from bot.utils.keyboards import (
     admin_action_request_detail_keyboard,
 )
 from bot.services.admin_service import AdminService
-from data.static_data import get_role, SALES_MANAGER, CATEGORIES, STORES, SALES_EXPERTS
+from data.static_data import get_role, SALES_MANAGER, STORES, SALES_EXPERTS
 
 (
     ADMIN_MANAGE_PRODUCTS,
@@ -38,7 +38,7 @@ from data.static_data import get_role, SALES_MANAGER, CATEGORIES, STORES, SALES_
 ) = range(40, 55)
 
 
-def _get_admin_action_description(request: dict) -> str:
+def _get_admin_action_description(request: dict, admin_service: AdminService) -> str:
     """توضیح جزئیات درخواست عملیات مدیریتی برای مدیر"""
     action_type = request.get("action_type")
     payload = request.get("payload", {})
@@ -47,10 +47,9 @@ def _get_admin_action_description(request: dict) -> str:
         category_key = payload.get("category_key", "")
         product_key = payload.get("product_key", "")
         active_flag = payload.get("active", True)
-        category = CATEGORIES.get(category_key, {})
-        product = category.get("products", {}).get(product_key, {})
+        product = admin_service.get_product(category_key, product_key) or {}
         action_text = "فعال کردن" if active_flag else "غیرفعال کردن"
-        return f"{action_text} کالا: {product.get('name', product_key)} ({category.get('name', category_key)})"
+        return f"{action_text} کالا: {product.get('name', product_key)} ({product.get('category_name', category_key)})"
     
     elif action_type == "store_toggle":
         store_code = payload.get("store_code", "")
@@ -170,7 +169,7 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
             )
             await callback.message.edit(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
-                description = _get_admin_action_description(request)
+                description = _get_admin_action_description(request, admin_service)
                 await context["bot"].send_message(
                     SALES_MANAGER["telegram_id"],
                     MESSAGES["admin_action_request_detail_with_desc"].format(
@@ -200,7 +199,7 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
             )
             await callback.message.edit(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
-                description = _get_admin_action_description(request)
+                description = _get_admin_action_description(request, admin_service)
                 await context["bot"].send_message(
                     SALES_MANAGER["telegram_id"],
                     MESSAGES["admin_action_request_detail_with_desc"].format(
@@ -229,7 +228,7 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
             )
             await callback.message.edit(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
-                description = _get_admin_action_description(request)
+                description = _get_admin_action_description(request, admin_service)
                 await context["bot"].send_message(
                     SALES_MANAGER["telegram_id"],
                     MESSAGES["admin_action_request_detail_with_desc"].format(
@@ -258,7 +257,7 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
             )
             await callback.message.edit(MESSAGES["admin_request_created"].format(title=request["title"], request_id=request["id"]))
             try:
-                description = _get_admin_action_description(request)
+                description = _get_admin_action_description(request, admin_service)
                 await context["bot"].send_message(
                     SALES_MANAGER["telegram_id"],
                     MESSAGES["admin_action_request_detail_with_desc"].format(
