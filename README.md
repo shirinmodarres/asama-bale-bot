@@ -39,12 +39,21 @@ cp .env.example .env
 Set your real bot token in `.env`:
 
 ```bash
-BOT_TOKEN=your-token
-MONGO_URI=mongodb://localhost:27017
-MONGO_DB_NAME=asama_bot
+APP_ENV=local
+BOT_TOKEN_LOCAL=your-local-token
+MONGO_URI_LOCAL=mongodb://localhost:27017
+MONGO_DB_NAME_LOCAL=asama_bot_local
+
+BOT_TOKEN_PRODUCTION=your-production-token
+MONGO_URI_PRODUCTION=mongodb://localhost:27017
+MONGO_DB_NAME_PRODUCTION=asama_bot
 ```
 
 MongoDB must be running before starting the bot.
+
+Use `APP_ENV=local` for local testing and `APP_ENV=production` only on the
+production server. Local admins/manager/expert IDs can be set with
+`LOCAL_ADMIN_IDS`, `LOCAL_SALES_MANAGER_ID`, and `LOCAL_EXPERT_ID`.
 
 ## Run
 

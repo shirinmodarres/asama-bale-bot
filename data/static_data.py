@@ -4,10 +4,19 @@ Single source of manually maintained MVP data.
 Edit Telegram IDs, stores, experts, manager/admin, categories, and products here.
 Do not hardcode this data inside handlers.
 """
+import os
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    load_dotenv = None
+
+if load_dotenv:
+    load_dotenv()
 
 ADMINS = [
-    # {"telegram_id": 700144333, "full_name": "System Manager"}, 
-    {"telegram_id": 583160697, "full_name": "Admin 2"},
+    {"telegram_id": 700144333, "full_name": "Amir Kamali"}, 
+    {"telegram_id": 583160697, "full_name": "Shirin Modarres"},
 ]
 
 BOT_ACTIVE = True
@@ -25,10 +34,6 @@ SALES_EXPERTS = {
     "expert_2": {
         "telegram_id": 557925611,
         "full_name": "خانم مدیری",
-    },
-    "expert_3": {
-        "telegram_id": 700144333,
-        "full_name": "کارشناس تست",
     },
 }
 
@@ -72,7 +77,7 @@ STORES = {
     "37": {"code": "37", "name": "قصر فیروزه", "expert_key": "expert_2"},
     "38": {"code": "38", "name": "دزفول", "expert_key": "expert_2"},
     "39": {"code": "39", "name": "ارومیه", "expert_key": "expert_2"},
-    "1382": {"code": "1382", "name": "تست", "expert_key": "expert_3"},
+    "1382": {"code": "1382", "name": "تست", "expert_key": "expert_1"},
 }
 
 CATEGORIES = {
@@ -144,6 +149,47 @@ CATEGORIES = {
 },
 },
 }
+
+
+def _env_int(name: str, default: int) -> int:
+    value = os.getenv(name, str(default)).strip()
+    return int(value)
+
+
+def _env_admins() -> list[dict]:
+    raw_ids = os.getenv("LOCAL_ADMIN_IDS", "583160697").strip()
+    return [
+        {"telegram_id": int(item.strip()), "full_name": f"Local Admin {item.strip()}"}
+        for item in raw_ids.split(",")
+        if item.strip()
+    ]
+
+
+LOCAL_ADMINS = _env_admins()
+
+LOCAL_SALES_MANAGER = {
+    "telegram_id": _env_int("LOCAL_SALES_MANAGER_ID", 132500720),
+    "full_name": "Local Sales Manager",
+}
+
+LOCAL_SALES_EXPERTS = {
+    "local_expert": {
+        "telegram_id": _env_int("LOCAL_EXPERT_ID", 700144333),
+        "full_name": "کارشناس تست لوکال",
+    },
+}
+
+LOCAL_STORES = {
+    "1382": {"code": "1382", "name": "فروشگاه تست لوکال", "expert_key": "local_expert"},
+}
+
+APP_ENV = os.getenv("APP_ENV", "local").strip().lower()
+if APP_ENV == "local":
+    ADMINS = LOCAL_ADMINS
+    SALES_MANAGER = LOCAL_SALES_MANAGER
+    SALES_EXPERTS = LOCAL_SALES_EXPERTS
+    STORES = LOCAL_STORES
+
 
 def get_store(code: str):
     return STORES.get(str(code).strip())
