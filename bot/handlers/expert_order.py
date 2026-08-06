@@ -1,5 +1,5 @@
 import logging
-from bale import Message, CallbackQuery, InputFile
+from bale import Message, CallbackQuery, InputFile, BaleError
 from datetime import datetime
 from pathlib import Path
 
@@ -27,6 +27,27 @@ logger = logging.getLogger(__name__)
 ORDER_CATEGORY, ORDER_PRODUCT, ORDER_QUANTITY, ORDER_TRACKING, ORDER_FACTOR, ORDER_SUMMARY, ORDER_REJECT_REASON, ORDER_CUSTOM_REJECT_REASON, ORDER_EDIT, ORDER_EDIT_FIELD = range(30, 40)
 
 ORDER_PHOTO_DIR = Path("data/uploads/orders")
+
+
+def _is_old_reply_message_error(error: Exception) -> bool:
+    return "message to be replied not found" in str(error).lower()
+
+
+async def _send_new_message_to_chat(message: Message, context: dict, text: str, **kwargs) -> None:
+    chat_id = getattr(message, "chat_id", None)
+    if chat_id is None:
+        chat = getattr(message, "chat", None)
+        chat_id = getattr(chat, "id", None)
+    if chat_id is None:
+        logger.warning("_send_new_message_to_chat: chat_id پیدا نشد")
+        return
+    try:
+        await context["bot"].send_message(chat_id, text, **kwargs)
+    except BaleError as exc:
+        if _is_old_reply_message_error(exc):
+            logger.warning("Bale old callback ignored: %s", exc)
+            return
+        raise
 
 
 # ====== توابع کمکی ======
@@ -458,7 +479,7 @@ async def submit_order(message: Message, context: dict):
     draft = context.get("order_draft")
     if not draft:
         logger.error("❌ order_draft در context وجود ندارد!")
-        await message.reply(MESSAGES["order_under_expert_review"])
+        await _send_new_message_to_chat(message, context, MESSAGES["order_under_expert_review"])
         return
 
     logger.info(f"📦 draft: {draft}")
@@ -624,7 +645,9 @@ async def pending_orders(message: Message, context: dict):
         ]
         if not pending_units:
             continue
-        await message.reply(_summary(order, units=pending_units))
+        pending_order = dict(order)
+        pending_order["quantity"] = len(pending_units)
+        await message.reply(_summary(pending_order, units=pending_units))
         for unit in pending_units:
             factor = unit.get("factor_image", {})
             tracking = unit.get("tracking_code", {})

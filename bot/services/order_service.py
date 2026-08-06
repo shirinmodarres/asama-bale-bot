@@ -136,6 +136,12 @@ class OrderService:
                 "store_code": {
                     "$in": list(store_codes),
                 },
+                "status": ORDER_PENDING_EXPERT_VALIDATION,
+                "units": {
+                    "$elemMatch": {
+                        "validation_status": "pending",
+                    }
+                },
             },
             {
                 "_id": 0,
@@ -143,11 +149,19 @@ class OrderService:
             },
         ).sort("_sequence", 1)
 
-        return [
-            order
-            for order in orders
-            if self.has_pending_units(order)
-        ]
+        pending_orders = []
+        for order in orders:
+            pending_units = [
+                unit
+                for unit in order.get("units", [])
+                if unit.get("validation_status", "pending") == "pending"
+            ]
+            if not pending_units:
+                continue
+            order["units"] = pending_units
+            pending_orders.append(order)
+
+        return pending_orders
 
     def has_pending_units(
         self,

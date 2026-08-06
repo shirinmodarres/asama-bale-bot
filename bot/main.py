@@ -5,7 +5,7 @@ try:
 except ImportError:
     load_dotenv = None
 
-from bale import Bot, Message, CallbackQuery
+from bale import Bot, Message, CallbackQuery, BaleError
 
 from bot.config import load_config
 from bot.utils.mongo import get_database
@@ -124,6 +124,21 @@ def _is_bot_access_allowed(user_id: int, admin_service: AdminService) -> bool:
     if admin_service.bot_active():
         return True
     return role in {"admin", "sales_manager"}
+
+
+def _is_old_bale_message_error(error: Exception) -> bool:
+    text = str(error).lower()
+    return "message to be replied not found" in text or "message not found" in text
+
+
+async def _safe_delete_callback_message(callback: CallbackQuery) -> None:
+    try:
+        await callback.message.delete()
+    except BaleError as exc:
+        if _is_old_bale_message_error(exc):
+            logger.warning("Old callback message delete ignored: %s", exc)
+            return
+        raise
 
 
 # ====== هندلر مرکزی متن ======
@@ -474,19 +489,19 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
     # ====== دکمه‌های اینلاین خلاصه سفارش ======
     if data == "order_submit":
         await submit_order(callback.message, context)
-        await callback.message.delete()
+        await _safe_delete_callback_message(callback)
         return
     if data == "order_edit":
         await edit_order_menu(callback.message, context)
-        await callback.message.delete()
+        await _safe_delete_callback_message(callback)
         return
     if data == "order_back":
         await back_order(callback.message, context)
-        await callback.message.delete()
+        await _safe_delete_callback_message(callback)
         return
     if data == "order_cancel":
         await cancel_order(callback.message, context)
-        await callback.message.delete()
+        await _safe_delete_callback_message(callback)
         return
 
     # ====== کارشناس ======
