@@ -31,16 +31,16 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
 
     admin_count = 0
     for admin in ADMINS:
+        is_active = admin.get("is_active", admin.get("active", True))
         db.admins.update_one(
             {"telegram_id": int(admin["telegram_id"])},
             {
                 "$set": {
                     "telegram_id": int(admin["telegram_id"]),
                     "full_name": admin.get("full_name", ""),
-                    "is_active": admin.get("is_active", admin.get("active", True)),
                     "updated_at": now,
                 },
-                "$setOnInsert": {"created_at": now},
+                "$setOnInsert": {"created_at": now, "is_active": is_active},
             },
             upsert=True,
         )
@@ -48,16 +48,16 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
 
     manager_count = 0
     if SALES_MANAGER:
+        is_active = SALES_MANAGER.get("is_active", SALES_MANAGER.get("active", True))
         db.sales_managers.update_one(
             {"telegram_id": int(SALES_MANAGER["telegram_id"])},
             {
                 "$set": {
                     "telegram_id": int(SALES_MANAGER["telegram_id"]),
                     "full_name": SALES_MANAGER.get("full_name", ""),
-                    "is_active": SALES_MANAGER.get("is_active", SALES_MANAGER.get("active", True)),
                     "updated_at": now,
                 },
-                "$setOnInsert": {"created_at": now},
+                "$setOnInsert": {"created_at": now, "is_active": is_active},
             },
             upsert=True,
         )
@@ -65,6 +65,7 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
 
     expert_count = 0
     for expert_key, expert in SALES_EXPERTS.items():
+        is_active = expert.get("is_active", expert.get("active", True))
         db.sales_experts.update_one(
             {"expert_key": expert_key},
             {
@@ -72,10 +73,9 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
                     "expert_key": expert_key,
                     "telegram_id": int(expert["telegram_id"]),
                     "full_name": expert.get("full_name", ""),
-                    "is_active": expert.get("is_active", expert.get("active", True)),
                     "updated_at": now,
                 },
-                "$setOnInsert": {"created_at": now},
+                "$setOnInsert": {"created_at": now, "is_active": is_active},
             },
             upsert=True,
         )
@@ -83,6 +83,7 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
 
     store_count = 0
     for code, store in STORES.items():
+        is_active = store.get("is_active", store.get("active", True))
         db.stores.update_one(
             {"code": str(code)},
             {
@@ -90,10 +91,9 @@ def seed_org_data(replace: bool = False) -> dict[str, int | str]:
                     "code": str(code),
                     "name": store.get("name", ""),
                     "expert_key": store.get("expert_key", ""),
-                    "is_active": store.get("is_active", store.get("active", True)),
                     "updated_at": now,
                 },
-                "$setOnInsert": {"created_at": now},
+                "$setOnInsert": {"created_at": now, "is_active": is_active},
             },
             upsert=True,
         )

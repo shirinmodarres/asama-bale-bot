@@ -207,7 +207,7 @@ def request_items_edit_keyboard(request_id: int, items: list[dict]):
     for idx, item in enumerate(items, start=1):
         markup.add(
             InlineKeyboardButton(
-                f"{idx}. {item['product_model']} - {item['carton_quantity']} کارتن",
+                f"{idx}. {item['product_model']} - ({item['carton_quantity']} کارتن)",
                 callback_data=f"expert_edit_item:{request_id}:{idx-1}",
             ),
             row=idx

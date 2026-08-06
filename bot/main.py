@@ -150,6 +150,8 @@ async def handle_text(message: Message, context: dict):
         await pending_requests(message, context)
         return
     if text == BTN_PENDING_ORDERS:
+        await message.reply(MESSAGES["expert_pending_reviews"])
+        await pending_requests(message, context)
         await pending_orders(message, context)
         return
     if text == BTN_EDIT_SELLER:

@@ -65,18 +65,8 @@ class AdminService:
         if not store:
             return None
 
-        status = self.db["admin_store_status"].find_one({
-            "_id": code
-        })
-
-        active = (
-            status.get("active")
-            if status is not None
-            else store.get("active", True)
-        )
-
         result = dict(store)
-        result["active"] = active
+        result["active"] = bool(store.get("is_active", store.get("active", True)))
 
         return result
 
@@ -123,19 +113,9 @@ class AdminService:
         if not expert:
             return None
 
-        status = self.db["admin_expert_status"].find_one({
-            "_id": expert_key
-        })
-
-        active = (
-            status.get("active")
-            if status is not None
-            else expert.get("active", True)
-        )
-
         result = dict(expert)
         result["expert_key"] = expert_key
-        result["active"] = active
+        result["active"] = bool(expert.get("is_active", expert.get("active", True)))
 
         return result
 

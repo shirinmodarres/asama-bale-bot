@@ -143,6 +143,7 @@ MESSAGES = {
     "order_for_expert_validation": "📋 سفارش کالا برای اعتبارسنجی کارشناس",
     "order_unit_for_expert_validation": "📋 اعتبارسنجی کالای شماره {index} از سفارش {order_id}",
     "order_pending_list": "📋 سفارش‌های در انتظار اعتبارسنجی:",
+    "expert_pending_reviews": "📋 بخش بررسی‌های کارشناس:\nابتدا درخواست‌های کالا و سپس سفارش‌های ثبت سریال نمایش داده می‌شود.",
     "order_no_pending": "✅ سفارشی در انتظار اعتبارسنجی نیست.",
     "order_not_for_expert": "⚠️ این سفارش مربوط به فروشگاه‌های شما نیست.",
     "order_unit_approved_done": "✅ کالا تایید شد.",

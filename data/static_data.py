@@ -174,7 +174,7 @@ def _env_admins() -> list[dict]:
 LOCAL_ADMINS = _env_admins()
 
 LOCAL_SALES_MANAGER = {
-    "telegram_id": _env_int("LOCAL_SALES_MANAGER_ID", 132500720),
+    "telegram_id": _env_int("LOCAL_SALES_MANAGER_ID", 141239156),
     "full_name": "Local Sales Manager",
 }
 

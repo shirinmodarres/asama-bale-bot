@@ -304,7 +304,11 @@ async def order_start(message: Message, context: dict):
     context["categories"] = context["product_service"].get_categories()
     await message.reply(
         MESSAGES["choose_category"],
-        components=categories_keyboard(context["categories"], navigation_prefix="order"),
+        components=categories_keyboard(
+            context["categories"],
+            include_inactive_products=True,
+            navigation_prefix="order",
+        ),
     )
     context["state"] = ORDER_CATEGORY
 
@@ -319,7 +323,12 @@ async def choose_order_category(callback: CallbackQuery, context: dict):
     draft["category_name"] = categories[category_key]["name"]
     await callback.message.edit(
         MESSAGES["choose_product"],
-        components=products_keyboard(categories, category_key, navigation_prefix="order"),
+        components=products_keyboard(
+            categories,
+            category_key,
+            include_inactive=True,
+            navigation_prefix="order",
+        ),
     )
     context["state"] = ORDER_PRODUCT
 
@@ -518,7 +527,11 @@ async def back_order(message: Message, context: dict):
         context["categories"] = categories
         await message.reply(
             MESSAGES["choose_category"],
-            components=categories_keyboard(categories, navigation_prefix="order"),
+            components=categories_keyboard(
+                categories,
+                include_inactive_products=True,
+                navigation_prefix="order",
+            ),
         )
         context["state"] = ORDER_CATEGORY
         return
@@ -526,7 +539,12 @@ async def back_order(message: Message, context: dict):
         categories = context.get("categories") or context["product_service"].get_categories()
         await message.reply(
             MESSAGES["choose_product"],
-            components=products_keyboard(categories, draft["category_key"], navigation_prefix="order"),
+            components=products_keyboard(
+                categories,
+                draft["category_key"],
+                include_inactive=True,
+                navigation_prefix="order",
+            ),
         )
         context["state"] = ORDER_PRODUCT
         return

@@ -133,7 +133,7 @@ class ExcelService:
             store = get_store(request["store_code"]) or {}
             expert = get_sales_experts().get(store.get("expert_key"), {})
             items_text = "\n".join(
-                f"{item['category_name']} / {item.get('product_name', '')} / مدل {item['product_model']} / {item['carton_quantity']} کارتن"
+                f"{item['category_name']} / {item.get('product_name', '')} / مدل {item['product_model']} / ({item['carton_quantity']} کارتن)"
                 for item in request["items"]
             )
             total_cartons = sum(item["carton_quantity"] for item in request["items"])

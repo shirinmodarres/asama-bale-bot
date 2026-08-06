@@ -8,7 +8,6 @@ class ProductCatalogService:
     def __init__(self, db, ttl_seconds: int = 60):
         self.db = db
         self.products = db["products"]
-        self.product_status = db["admin_product_status"]
         self.ttl = timedelta(seconds=ttl_seconds)
         self._cache: dict | None = None
         self._cache_until: datetime | None = None
@@ -57,18 +56,24 @@ class ProductCatalogService:
         if self.get_product(category_key, product_key) is None:
             return False
 
-        self.product_status.update_one(
-            {"_id": f"{category_key}:{product_key}"},
+        result = self.products.update_one(
+            {
+                "category_key": category_key,
+                "$or": [
+                    {"product_key": product_key},
+                    {"product_code": product_key},
+                ],
+            },
             {
                 "$set": {
-                    "category_key": category_key,
-                    "product_key": product_key,
+                    "is_active": bool(active),
                     "active": bool(active),
                     "updated_at": datetime.utcnow().isoformat(timespec="seconds"),
                 }
-            },
-            upsert=True,
+            }
         )
+        if result.matched_count == 0:
+            return False
         self.clear_cache()
         return True
 
@@ -86,8 +91,6 @@ class ProductCatalogService:
             return {}
 
         categories: dict = {}
-        overrides = self._product_status_overrides()
-
         for document in documents:
             category_key = str(document.get("category_key") or "").strip()
             product_key = str(document.get("product_key") or document.get("product_code") or "").strip()
@@ -102,31 +105,15 @@ class ProductCatalogService:
                 },
             )
 
-            active = bool(document.get("is_active", document.get("active", True)))
-            override = overrides.get(f"{category_key}:{product_key}")
-            if override is not None:
-                active = override
-
             category["products"][product_key] = {
                 "name": document.get("product_name") or document.get("name") or product_key,
                 "model": document.get("product_model") or document.get("model") or "",
                 "code": document.get("product_code") or document.get("code") or product_key,
                 "price": document.get("price", 0),
-                "active": active,
+                "active": bool(document.get("is_active", document.get("active", True))),
             }
 
         return categories
-
-    def _product_status_overrides(self) -> dict[str, bool]:
-        try:
-            statuses = self.product_status.find({})
-        except Exception:
-            return {}
-        return {
-            item["_id"]: bool(item.get("active", True))
-            for item in statuses
-            if item.get("_id")
-        }
 
     @staticmethod
     def _fallback_categories() -> dict:
