@@ -536,7 +536,14 @@ async def cancel_order(message: Message, context: dict):
     await message.reply(MESSAGES["order_cancelled"], components=seller_main_menu())
 
 
-async def back_order(message: Message, context: dict):
+async def _order_step_response(message: Message, text: str, components=None, edit_current: bool = False) -> None:
+    if edit_current:
+        await message.edit(text, components=components)
+        return
+    await message.reply(text, components=components)
+
+
+async def back_order(message: Message, context: dict, edit_current: bool = False):
     """Move one safe step back without submitting the serial order."""
     state = context.get("state")
     draft = context.get("order_draft")
@@ -546,19 +553,22 @@ async def back_order(message: Message, context: dict):
     if state == ORDER_PRODUCT:
         categories = context["product_service"].get_categories()
         context["categories"] = categories
-        await message.reply(
+        await _order_step_response(
+            message,
             MESSAGES["choose_category"],
             components=categories_keyboard(
                 categories,
                 include_inactive_products=True,
                 navigation_prefix="order",
             ),
+            edit_current=edit_current,
         )
         context["state"] = ORDER_CATEGORY
         return
     if state == ORDER_QUANTITY:
         categories = context.get("categories") or context["product_service"].get_categories()
-        await message.reply(
+        await _order_step_response(
+            message,
             MESSAGES["choose_product"],
             components=products_keyboard(
                 categories,
@@ -566,6 +576,7 @@ async def back_order(message: Message, context: dict):
                 include_inactive=True,
                 navigation_prefix="order",
             ),
+            edit_current=edit_current,
         )
         context["state"] = ORDER_PRODUCT
         return

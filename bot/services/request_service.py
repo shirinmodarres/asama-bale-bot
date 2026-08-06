@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from bot.data.statuses import (
     APPROVED_BY_EXPERT,
     APPROVED_BY_MANAGER,
+    CANCELLED,
     PENDING_EXPERT,
     PENDING_MANAGER,
     PENDING_SELLER_CONFIRMATION,
@@ -346,7 +347,7 @@ class RequestService:
 
         now = utc_now()
 
-        request["status"] = PENDING_EXPERT
+        request["status"] = CANCELLED
         request["seller_reject_reason"] = (
             "فروشنده پیشنهاد تغییر تعداد را رد کرد."
         )
@@ -357,7 +358,7 @@ class RequestService:
             {
                 "$set": {
                     "items": items,
-                    "status": PENDING_EXPERT,
+                    "status": CANCELLED,
                     "seller_reject_reason": (
                         "فروشنده پیشنهاد تغییر تعداد را رد کرد."
                     ),

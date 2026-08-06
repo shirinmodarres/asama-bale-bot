@@ -434,7 +434,7 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
         if action == "cancel":
             await cancel_order(callback.message, context)
         else:
-            await back_order(callback.message, context)
+            await back_order(callback.message, context, edit_current=True)
         return
 
     if data.startswith("request_nav:"):
