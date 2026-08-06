@@ -93,7 +93,7 @@ async def expert_request_callback(callback: CallbackQuery, context: dict):
             request["seller_telegram_id"],
             MESSAGES["request_finalized_by_expert"],
         )
-        await callback.message.edit(MESSAGES["request_finalized_by_expert"])
+        await callback.message.edit(MESSAGES["request_finalized_done_for_expert"])
         return
 
     if action == "edit":
