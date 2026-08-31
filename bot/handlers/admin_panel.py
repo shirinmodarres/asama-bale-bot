@@ -15,8 +15,12 @@ from bot.utils.keyboards import (
     expert_action_keyboard,
     admin_action_requests_keyboard,
     admin_action_request_detail_keyboard,
+    wallet_admin_actions_keyboard,
+    wallet_admin_confirm_keyboard,
 )
 from bot.services.admin_service import AdminService
+from bot.services.wallet_service import SOURCE_LABELS_FA, TYPE_LABELS_FA, manual_transaction_id
+from bot.utils.normalize import normalize_digits
 from data.static_data import get_role, get_sales_manager
 
 (
@@ -35,7 +39,23 @@ from data.static_data import get_role, get_sales_manager
     ADMIN_ACTION_REQUEST_APPROVE,
     ADMIN_ACTION_REQUEST_REJECT,
     ADMIN_REJECT_REASON,
-) = range(40, 55)
+    ADMIN_WALLET_AMOUNT,
+    ADMIN_WALLET_DESCRIPTION,
+) = range(40, 57)
+
+
+def _format_money(amount: int) -> str:
+    if amount in (None, ""):
+        return "-"
+    return f"{int(amount):,}"
+
+
+def _wallet_operation_label(operation: str) -> str:
+    return {
+        "credit": "افزایش موجودی",
+        "debit": "کاهش موجودی",
+        "settlement": "تسویه / ارسال به مالی",
+    }.get(operation, operation)
 
 
 def _get_admin_action_description(request: dict, admin_service: AdminService) -> str:
@@ -96,6 +116,59 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
         return
     if data == "admin:products":
         await callback.message.edit(MESSAGES["admin_products_list"], components=admin_products_menu())
+        return
+    if data == "admin:wallet":
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        stores = [store for store in admin_service.list_stores() if store.get("active", True)]
+        await callback.message.edit(
+            MESSAGES["admin_wallet_store_list"],
+            components=stores_keyboard(stores, "admin:wallet_store", back_callback="admin:main"),
+        )
+        return
+    if data.startswith("admin:wallet_store:"):
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        store_code = data.rsplit(":", 1)[1]
+        await _show_wallet_detail(callback.message, context, store_code)
+        return
+    if data.startswith("admin:wallet_history:"):
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        store_code = data.rsplit(":", 1)[1]
+        await _show_wallet_history(callback.message, context, store_code)
+        return
+    if data.startswith("admin:wallet_action:"):
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        _, _, store_code, operation = data.split(":")
+        seller = context["user_service"].get_approved_seller_by_store(store_code)
+        if not seller:
+            await callback.message.edit(MESSAGES["admin_wallet_no_seller"])
+            return
+        context["admin_wallet_draft"] = {
+            "store_code": store_code,
+            "operation": operation,
+            "seller_telegram_id": seller["telegram_id"],
+            "seller_name": seller.get("full_name", ""),
+        }
+        await callback.message.edit(MESSAGES["admin_wallet_ask_amount"])
+        context["state"] = ADMIN_WALLET_AMOUNT
+        return
+    if data == "admin:wallet_cancel":
+        context.pop("admin_wallet_draft", None)
+        context.pop("state", None)
+        await callback.message.edit(MESSAGES["admin_wallet_cancelled"])
+        return
+    if data == "admin:wallet_confirm":
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        await _confirm_wallet_operation(callback, context)
         return
     if data == "admin:stores":
         await callback.message.edit(MESSAGES["admin_stores_list"], components=admin_stores_menu())
@@ -343,3 +416,159 @@ async def receive_admin_reject_reason(message: Message, context: dict):
     except Exception:
         pass
     context.pop("state", None)
+
+
+async def _show_wallet_detail(message, context: dict, store_code: str):
+    store = context["admin_service"].get_store(store_code)
+    seller = context["user_service"].get_approved_seller_by_store(store_code)
+    if not seller:
+        await message.edit(MESSAGES["admin_wallet_no_seller"])
+        return
+    balance = context["wallet_service"].get_balance(seller["telegram_id"])
+    await message.edit(
+        MESSAGES["admin_wallet_detail"].format(
+            store_code=store_code,
+            store_name=(store or {}).get("name", ""),
+            seller_name=seller.get("full_name", ""),
+            balance=_format_money(balance),
+        ),
+        components=wallet_admin_actions_keyboard(store_code),
+    )
+
+
+async def _show_wallet_history(message, context: dict, store_code: str):
+    seller = context["user_service"].get_approved_seller_by_store(store_code)
+    if not seller:
+        await message.edit(MESSAGES["admin_wallet_no_seller"])
+        return
+    transactions = context["wallet_service"].list_transactions(seller["telegram_id"], limit=10)
+    if not transactions:
+        await message.edit(MESSAGES["admin_wallet_history_empty"], components=wallet_admin_actions_keyboard(store_code))
+        return
+    lines = [MESSAGES["admin_wallet_history_title"]]
+    for transaction in transactions:
+        sign = "+" if transaction.get("type") == "credit" else "-"
+        date_text = transaction.get("jalali_date", "")
+        if transaction.get("tehran_time"):
+            date_text = f"{date_text} {transaction['tehran_time']}".strip()
+        lines.append(
+            MESSAGES["admin_wallet_history_line"].format(
+                date=date_text,
+                type=TYPE_LABELS_FA.get(transaction.get("type"), transaction.get("type", "")),
+                source=SOURCE_LABELS_FA.get(transaction.get("source"), transaction.get("source", "")),
+                amount=f"{sign}{_format_money(transaction.get('amount', 0))}",
+                description=transaction.get("description", ""),
+                balance_before=_format_money(transaction.get("balance_before", 0)),
+                balance_after=_format_money(transaction.get("balance_after", 0)),
+            )
+        )
+    await message.edit("\n\n".join(lines), components=wallet_admin_actions_keyboard(store_code))
+
+
+async def receive_wallet_amount(message: Message, context: dict):
+    draft = context.get("admin_wallet_draft")
+    if not draft:
+        await message.reply(MESSAGES["request_not_found"])
+        context.pop("state", None)
+        return
+    text = normalize_digits(message.content or "").replace(",", "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        await message.reply(MESSAGES["admin_wallet_invalid_amount"])
+        return
+
+    amount = int(text)
+    balance = context["wallet_service"].get_balance(draft["seller_telegram_id"])
+    operation = draft["operation"]
+    if operation in {"debit", "settlement"} and amount > balance:
+        await message.reply(MESSAGES["admin_wallet_insufficient"])
+        return
+
+    draft["amount"] = amount
+    draft["balance_before"] = balance
+    draft["balance_after"] = balance + amount if operation == "credit" else balance - amount
+
+    if operation == "settlement":
+        draft["description"] = "تسویه و ارسال به مالی"
+        await _send_wallet_confirmation(message, context)
+        return
+
+    await message.reply(MESSAGES["admin_wallet_ask_description"])
+    context["state"] = ADMIN_WALLET_DESCRIPTION
+
+
+async def receive_wallet_description(message: Message, context: dict):
+    draft = context.get("admin_wallet_draft")
+    if not draft:
+        await message.reply(MESSAGES["request_not_found"])
+        context.pop("state", None)
+        return
+    draft["description"] = (message.content or "").strip()
+    await _send_wallet_confirmation(message, context)
+
+
+async def _send_wallet_confirmation(message: Message, context: dict):
+    draft = context["admin_wallet_draft"]
+    store = context["admin_service"].get_store(draft["store_code"]) or {}
+    await message.reply(
+        MESSAGES["admin_wallet_confirm"].format(
+            store_name=store.get("name", draft["store_code"]),
+            operation=_wallet_operation_label(draft["operation"]),
+            amount=_format_money(draft["amount"]),
+            balance_before=_format_money(draft["balance_before"]),
+            balance_after=_format_money(draft["balance_after"]),
+            description=draft["description"],
+        ),
+        components=wallet_admin_confirm_keyboard(),
+    )
+    context.pop("state", None)
+
+
+async def _confirm_wallet_operation(callback: CallbackQuery, context: dict):
+    draft = context.get("admin_wallet_draft")
+    if not draft:
+        await callback.message.edit(MESSAGES["request_not_found"])
+        return
+
+    operation = draft["operation"]
+    transaction_type = "credit" if operation == "credit" else "debit"
+    source = "settlement" if operation == "settlement" else "manual_admin"
+    try:
+        transaction, _applied = context["wallet_service"].apply_transaction(
+            telegram_id=draft["seller_telegram_id"],
+            store_code=draft["store_code"],
+            transaction_type=transaction_type,
+            source=source,
+            amount=draft["amount"],
+            description=draft["description"],
+            transaction_id=manual_transaction_id(source, draft["seller_telegram_id"]),
+            admin_telegram_id=callback.from_user.id,
+        )
+    except ValueError:
+        await callback.message.edit(MESSAGES["admin_wallet_insufficient"])
+        return
+
+    await _notify_seller_wallet_changed(callback, context, draft, transaction)
+    context.pop("admin_wallet_draft", None)
+    context.pop("state", None)
+    await callback.message.edit(MESSAGES["admin_wallet_done"])
+
+
+async def _notify_seller_wallet_changed(
+    callback: CallbackQuery,
+    context: dict,
+    draft: dict,
+    transaction: dict,
+) -> None:
+    try:
+        await context["bot"].send_message(
+            draft["seller_telegram_id"],
+            MESSAGES["seller_wallet_admin_changed"].format(
+                operation=_wallet_operation_label(draft["operation"]),
+                amount=_format_money(transaction.get("amount", draft["amount"])),
+                balance_before=_format_money(transaction.get("balance_before", draft.get("balance_before", 0))),
+                balance_after=_format_money(transaction.get("balance_after", draft.get("balance_after", 0))),
+                description=transaction.get("description", draft.get("description", "")),
+            ),
+        )
+    except Exception:
+        pass

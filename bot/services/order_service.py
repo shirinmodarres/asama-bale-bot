@@ -1,12 +1,15 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+from pymongo.errors import DuplicateKeyError
+
 from bot.data.statuses import (
     ORDER_APPROVED_BY_EXPERT,
     ORDER_PARTIALLY_APPROVED_BY_EXPERT,
     ORDER_PENDING_EXPERT_VALIDATION,
     ORDER_REJECTED_BY_EXPERT,
 )
+from bot.utils.datetime_format import jalali_datetime_parts
 from bot.utils.normalize import normalize_digits
 
 
@@ -24,7 +27,10 @@ def _safe_path_part(value: str) -> str:
 
 class OrderService:
     def __init__(self, db):
+        self.db = db
         self.collection = db["orders"]
+        self.tracking_codes = db["product_tracking_codes"]
+        self.tracking_codes.create_index("tracking_code", unique=True)
 
     def create_order(self, draft: dict) -> dict:
         last_order = self.collection.find_one(
@@ -39,6 +45,7 @@ class OrderService:
         )
 
         now = utc_now()
+        jalali_date, jalali_month, tehran_time = jalali_datetime_parts(now)
         units = [
             self._normalize_unit(draft, unit)
             for unit in draft["units"]
@@ -57,6 +64,7 @@ class OrderService:
             "category_key": draft["category_key"],
             "category_name": draft["category_name"],
             "product_key": draft["product_key"],
+            "product_code": draft.get("product_code", draft["product_key"]),
             "product_name": draft["product_name"],
             "product_model": draft["product_model"],
             "product_price": draft.get("product_price", 0),
@@ -66,6 +74,9 @@ class OrderService:
             "rejection_reason_key": None,
             "rejection_reason_text": None,
             "created_at": now,
+            "jalali_date": jalali_date,
+            "jalali_month": jalali_month,
+            "tehran_time": tehran_time,
             "updated_at": now,
         }
 
@@ -82,20 +93,12 @@ class OrderService:
         if not tracking_code:
             return False
 
-        exact_match = self.collection.find_one(
-            {
-                "units": {
-                    "$elemMatch": {
-                        "validation_status": "approved",
-                        "tracking_code.type": "text",
-                        "tracking_code.value": tracking_code,
-                    }
-                }
-            },
-            {"_id": 1},
+        tracking = self.tracking_codes.find_one(
+            {"tracking_code": tracking_code},
+            {"_id": 0, "status": 1},
         )
-        if exact_match:
-            return True
+        if tracking:
+            return tracking.get("status") != "returned_resellable"
 
         orders = self.collection.find(
             {"units.validation_status": "approved", "units.tracking_code.type": "text"},
@@ -111,6 +114,52 @@ class OrderService:
                 if normalize_digits(media.get("value") or "") == tracking_code:
                     return True
         return False
+
+    def register_sold_tracking_code(self, order_id: str, unit_index: int) -> bool:
+        order = self.get_order(order_id)
+        if not order:
+            return False
+        unit = next((item for item in order.get("units", []) if int(item["index"]) == int(unit_index)), None)
+        if not unit or unit.get("validation_status") != "approved":
+            return False
+        tracking = unit.get("tracking_code", {})
+        if tracking.get("type") != "text" or not tracking.get("value"):
+            return False
+
+        tracking_code = normalize_digits(tracking["value"])
+        now = utc_now()
+        document = {
+            "tracking_code": tracking_code,
+            "product_key": order.get("product_key", ""),
+            "product_code": order.get("product_code", order.get("product_key", "")),
+            "product_name": order.get("product_name", ""),
+            "order_id": order["id"],
+            "unit_index": int(unit_index),
+            "store_code": order.get("store_code", ""),
+            "seller_telegram_id": order.get("seller_telegram_id"),
+            "status": "sold",
+            "sold_at": unit.get("validation_decision_at") or now,
+            "returned_at": None,
+            "updated_at": now,
+        }
+        try:
+            result = self.tracking_codes.update_one(
+                {
+                    "tracking_code": tracking_code,
+                    "$or": [
+                        {"status": {"$exists": False}},
+                        {"status": "returned_resellable"},
+                    ],
+                },
+                {
+                    "$set": document,
+                    "$setOnInsert": {"created_at": now},
+                },
+                upsert=True,
+            )
+        except DuplicateKeyError:
+            return False
+        return bool(result.matched_count or result.upserted_id)
 
     def get_order(self, order_id: str):
         return self.collection.find_one(
@@ -324,6 +373,7 @@ class OrderService:
                 "category_key": draft["category_key"],
                 "category_name": draft["category_name"],
                 "product_key": draft["product_key"],
+                "product_code": draft.get("product_code", draft["product_key"]),
                 "product_name": draft["product_name"],
                 "product_model": draft["product_model"],
                 "product_price": draft.get("product_price", 0),

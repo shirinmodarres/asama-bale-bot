@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from bot.data.statuses import ACTIVE, PENDING_SELLER_APPROVAL, SELLER_REJECTED
+from bot.services.wallet_service import WalletService
 
 
 COMMISSION_PERCENT = 4
@@ -16,8 +17,9 @@ def utc_now() -> str:
 
 
 class UserService:
-    def __init__(self, db):
+    def __init__(self, db, wallet_service: WalletService | None = None):
         self.collection = db["users"]
+        self.wallet_service = wallet_service or WalletService(db)
 
     def get_user(self, telegram_id: int):
         return self.collection.find_one(
@@ -143,18 +145,22 @@ class UserService:
             }
 
         wallet = self._ensure_wallet(user)
+        balance = int(wallet.get("balance", 0) or 0)
 
         self.collection.update_one(
             {"telegram_id": int(telegram_id)},
             {
                 "$set": {
-                    "wallet": wallet,
+                    "wallet.balance": balance,
                     "updated_at": utc_now(),
                 }
             },
         )
 
-        return wallet
+        return {
+            "balance": balance,
+            "transactions": self.wallet_service.list_transactions(telegram_id, limit=10),
+        }
 
     def credit_wallet(
         self,
@@ -162,6 +168,8 @@ class UserService:
         amount: int,
         transaction_id: str,
         description: str,
+        source: str = "commission",
+        store_code: str | None = None,
     ) -> tuple[dict, bool]:
 
         user = self.collection.find_one(
@@ -174,39 +182,18 @@ class UserService:
                 "transactions": [],
             }, False
 
-        wallet = self._ensure_wallet(user)
-
-        if any(
-            transaction.get("id") == transaction_id
-            for transaction in wallet["transactions"]
-        ):
-            return wallet, False
-
-        now = utc_now()
-
-        wallet["balance"] += amount
-
-        wallet["transactions"].append(
-            {
-                "id": transaction_id,
-                "type": "credit",
-                "amount": amount,
-                "description": description,
-                "created_at": now,
-            }
+        transaction, applied = self.wallet_service.apply_transaction(
+            telegram_id=telegram_id,
+            store_code=store_code or user.get("store_code", ""),
+            transaction_type="credit",
+            source=source,
+            amount=amount,
+            description=description,
+            transaction_id=transaction_id,
         )
-
-        self.collection.update_one(
-            {"telegram_id": int(telegram_id)},
-            {
-                "$set": {
-                    "wallet": wallet,
-                    "updated_at": now,
-                }
-            },
-        )
-
-        return wallet, True
+        wallet = self.get_wallet(telegram_id)
+        wallet["last_transaction"] = transaction
+        return wallet, applied
 
     def _set_status(self, telegram_id: int, status: str):
         result = self.collection.update_one(

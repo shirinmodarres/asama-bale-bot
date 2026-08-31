@@ -8,6 +8,7 @@ from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.worksheet import Worksheet
 
 from bot.data.statuses import order_status_label, status_label
+from bot.services.wallet_service import SOURCE_LABELS_FA, TYPE_LABELS_FA
 from bot.utils.datetime_format import format_shamsi_datetime
 from data.static_data import get_sales_experts, get_store
 
@@ -116,6 +117,7 @@ class ExcelService:
     # ستون‌هایی که متن چندخطی دارند و باید wrap شوند
     REQUEST_WRAP_COLUMNS = {6}  # اقلام
     ORDER_WRAP_COLUMNS = {11}  # واحدها
+    WALLET_INTEGER_COLUMNS = {3}
 
     HEADER_FILL = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     HEADER_FONT = Font(name="Tahoma", size=11, bold=True, color="FFFFFF")
@@ -208,6 +210,41 @@ class ExcelService:
         )
 
         return self._save_workbook(workbook, prefix="sales-orders")
+
+    def export_wallet_transactions(self, transactions: list[dict]) -> Path:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "تراکنش‌های کیف پول"
+        sheet.append([
+            "تاریخ شمسی",
+            "نوع",
+            "مبلغ (ریال)",
+            "منبع",
+            "توضیح",
+            "کد فروشگاه",
+        ])
+
+        for transaction in transactions:
+            sign = 1 if transaction.get("type") == "credit" else -1
+            date_text = transaction.get("jalali_date", "")
+            if transaction.get("tehran_time"):
+                date_text = f"{date_text} {transaction['tehran_time']}".strip()
+            sheet.append([
+                date_text,
+                TYPE_LABELS_FA.get(transaction.get("type"), transaction.get("type", "")),
+                sign * int(transaction.get("amount", 0) or 0),
+                SOURCE_LABELS_FA.get(transaction.get("source"), transaction.get("source", "")),
+                transaction.get("description", ""),
+                transaction.get("store_code", ""),
+            ])
+
+        self._apply_professional_style(
+            sheet,
+            integer_columns=self.WALLET_INTEGER_COLUMNS,
+            wrap_columns={5},
+        )
+
+        return self._save_workbook(workbook, prefix="wallet-transactions")
 
     def _apply_professional_style(
         self,

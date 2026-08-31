@@ -45,3 +45,25 @@ def format_shamsi_datetime(value: str) -> str:
     tehran_time = parsed + timedelta(hours=3, minutes=30)
     jy, jm, jd = _gregorian_to_jalali(tehran_time.year, tehran_time.month, tehran_time.day)
     return f"{jy:04d}/{jm:02d}/{jd:02d} {tehran_time.hour:02d}:{tehran_time.minute:02d}"
+
+
+def jalali_date_parts(value: str) -> tuple[str, str]:
+    jalali_date, jalali_month, _tehran_time = jalali_datetime_parts(value)
+    return jalali_date, jalali_month
+
+
+def jalali_datetime_parts(value: str) -> tuple[str, str, str]:
+    if not value:
+        value = datetime.utcnow().isoformat()
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        parsed = datetime.utcnow()
+
+    tehran_time = parsed + timedelta(hours=3, minutes=30)
+    jy, jm, jd = _gregorian_to_jalali(tehran_time.year, tehran_time.month, tehran_time.day)
+    return (
+        f"{jy:04d}/{jm:02d}/{jd:02d}",
+        f"{jy:04d}/{jm:02d}",
+        f"{tehran_time.hour:02d}:{tehran_time.minute:02d}:{tehran_time.second:02d}",
+    )

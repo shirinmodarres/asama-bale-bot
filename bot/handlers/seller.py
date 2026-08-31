@@ -1,7 +1,9 @@
-from bale import Message, CallbackQuery
+from bale import InputFile, Message, CallbackQuery
 
 from bot.data.messages import MESSAGES
 from bot.data.statuses import status_label
+from bot.services.excel_service import ExcelService
+from bot.services.wallet_service import SOURCE_LABELS_FA, TYPE_LABELS_FA
 from bot.services.notification_service import format_request, notify_expert_request
 from bot.data.statuses import ACTIVE
 from bot.utils.keyboards import (
@@ -17,6 +19,7 @@ from bot.utils.keyboards import (
     quantity_change_keyboard,
     request_review_keyboard,
     seller_main_menu,
+    seller_wallet_keyboard,
     summary_menu,
 )
 from bot.utils.datetime_format import format_shamsi_datetime
@@ -341,15 +344,38 @@ async def show_wallet(message: Message, context: dict):
         MESSAGES["wallet_balance"].format(balance=_format_money(wallet["balance"])),
         "",
     ]
-    transactions = wallet.get("transactions", [])[-5:]
+    transactions = wallet.get("transactions", [])[:10]
     if not transactions:
         lines.append(MESSAGES["wallet_no_transactions"])
     else:
         lines.append(MESSAGES["wallet_last_transactions"])
-        for transaction in reversed(transactions):
+        for transaction in transactions:
+            sign = "+" if transaction.get("type") == "credit" else "-"
+            source = SOURCE_LABELS_FA.get(transaction.get("source"), transaction.get("source", ""))
             lines.append(MESSAGES["wallet_transaction_line"].format(
                 date=format_shamsi_datetime(transaction.get("created_at", "")),
-                amount=_format_money(transaction.get("amount", 0)),
+                amount=f"{sign}{_format_money(transaction.get('amount', 0))}",
+                type=TYPE_LABELS_FA.get(transaction.get("type"), transaction.get("type", "")),
+                source=source,
                 description=transaction.get("description", ""),
             ))
-    await message.reply("\n".join(lines), components=seller_main_menu())
+        lines.append("")
+        lines.append(MESSAGES["wallet_export_hint"])
+    await message.reply("\n".join(lines), components=seller_wallet_keyboard())
+
+
+async def export_wallet_transactions(callback: CallbackQuery, context: dict):
+    user = context["user_service"].get_user(callback.from_user.id)
+    if not user or user.get("status") != ACTIVE:
+        await callback.message.edit(MESSAGES["not_approved_seller"])
+        return
+
+    transactions = context["wallet_service"].list_transactions(callback.from_user.id, limit=None)
+    if not transactions:
+        await callback.message.edit(MESSAGES["wallet_no_transactions"])
+        return
+
+    path = ExcelService().export_wallet_transactions(transactions)
+    with path.open("rb") as file:
+        await callback.message.reply_document(InputFile(file.read(), file_name="wallet_transactions.xlsx"))
+    path.unlink(missing_ok=True)

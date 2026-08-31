@@ -14,10 +14,13 @@ from bot.services.request_service import RequestService
 from bot.services.order_service import OrderService
 from bot.services.admin_service import AdminService
 from bot.services.product_service import ProductCatalogService
+from bot.services.wallet_service import WalletService
+from bot.services.return_service import ProductReturnService
 from bot.data.messages import MESSAGES
 from bot.utils.keyboards import (
     BTN_REQUEST_GOODS,
     BTN_CREATE_ORDER,
+    BTN_RETURN_PRODUCT,
     BTN_MY_REQUESTS,
     BTN_WALLET,
     BTN_PENDING_REQUESTS,
@@ -36,6 +39,7 @@ from bot.utils.keyboards import (
     BTN_ADMIN_MANAGE_STORES,
     BTN_ADMIN_MANAGE_EXPERTS,
     BTN_ADMIN_MANAGE_BOT,
+    BTN_ADMIN_MANAGE_WALLET,
     BTN_ADMIN_ACTION_REQUESTS,
     BTN_ADMIN_ACTIVE_PRODUCTS,
     BTN_ADMIN_INACTIVE_PRODUCTS,
@@ -70,7 +74,7 @@ from bot.handlers.seller import (
     request_goods, choose_category, choose_product, receive_quantity,
     add_item, edit_item_menu, select_edit_item, receive_edit_quantity,
     remove_item_menu, remove_item, submit_request, cancel_request,
-    my_requests, quantity_change_callback, show_wallet,
+    my_requests, quantity_change_callback, show_wallet, export_wallet_transactions,
     CATEGORY, PRODUCT, QUANTITY, SUMMARY, EDIT_ITEM, EDIT_QUANTITY, REMOVE_ITEM
 )
 
@@ -102,7 +106,15 @@ from bot.handlers.expert import (
 from bot.handlers.admin import bot_info, export_requests, export_orders
 from bot.handlers.admin_panel import (
     admin_panel, admin_menu_callback, receive_admin_reject_reason,
-    ADMIN_REJECT_REASON,
+    receive_wallet_amount, receive_wallet_description,
+    ADMIN_REJECT_REASON, ADMIN_WALLET_AMOUNT, ADMIN_WALLET_DESCRIPTION,
+)
+from bot.handlers.returns import (
+    return_start, choose_return_product,
+    choose_return_type, receive_return_tracking, receive_return_invoice,
+    confirm_return, cancel_return, cancel_return_callback,
+    RETURN_SELECT_PRODUCT, RETURN_TYPE, RETURN_TRACKING,
+    RETURN_INVOICE, RETURN_SUMMARY,
 )
 
 logger = logging.getLogger(__name__)
@@ -155,6 +167,9 @@ async def handle_text(message: Message, context: dict):
     if text == BTN_CREATE_ORDER:
         await order_start(message, context)
         return
+    if text == BTN_RETURN_PRODUCT:
+        await return_start(message, context)
+        return
     if text == BTN_MY_REQUESTS:
         await my_requests(message, context)
         return
@@ -199,6 +214,16 @@ async def handle_text(message: Message, context: dict):
                 active=MESSAGES["bot_status_on"] if context["admin_service"].bot_active() else MESSAGES["bot_status_off"]
             ),
             components=admin_bot_menu(context["admin_service"].bot_active()),
+        )
+        return
+    if text == BTN_ADMIN_MANAGE_WALLET:
+        if get_role(message.author.id) != "admin":
+            await message.reply(MESSAGES["not_allowed"])
+            return
+        stores = [store for store in context["admin_service"].list_stores() if store.get("active", True)]
+        await message.reply(
+            MESSAGES["admin_wallet_store_list"],
+            components=stores_keyboard(stores, "admin:wallet_store", back_callback="admin:main"),
         )
         return
     if text == BTN_ADMIN_ACTION_REQUESTS:
@@ -317,6 +342,13 @@ async def handle_text(message: Message, context: dict):
             await back_order(message, context)
         return
 
+    if current_state in {
+        RETURN_SELECT_PRODUCT, RETURN_TYPE,
+        RETURN_TRACKING, RETURN_INVOICE, RETURN_SUMMARY,
+    } and text == BTN_CANCEL:
+        await cancel_return(message, context)
+        return
+
     if text == BTN_BACK:
         role = get_role(message.author.id)
         context.pop("state", None)
@@ -367,6 +399,14 @@ async def handle_text(message: Message, context: dict):
         await receive_custom_rejection_reason(message, context)
         return
 
+    # ====== جریان مرجوعی کالا ======
+    if current_state == RETURN_TRACKING:
+        await receive_return_tracking(message, context)
+        return
+    if current_state == RETURN_INVOICE:
+        await receive_return_invoice(message, context)
+        return
+
     # ====== ثبت‌نام ======
     if current_state == STORE_CODE:
         await receive_store_code(message, context)
@@ -398,6 +438,12 @@ async def handle_text(message: Message, context: dict):
     if current_state == ADMIN_REJECT_REASON:
         await receive_admin_reject_reason(message, context)
         return
+    if current_state == ADMIN_WALLET_AMOUNT:
+        await receive_wallet_amount(message, context)
+        return
+    if current_state == ADMIN_WALLET_DESCRIPTION:
+        await receive_wallet_description(message, context)
+        return
 
     # ====== دستورات /start و غیره ======
     if text.startswith("/start"):
@@ -427,6 +473,23 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
 
     if data.startswith("admin:"):
         await admin_menu_callback(callback, context)
+        return
+
+    if data == "seller_wallet_export":
+        await export_wallet_transactions(callback, context)
+        return
+
+    if data.startswith("return_product:"):
+        await choose_return_product(callback, context)
+        return
+    if data.startswith("return_type:"):
+        await choose_return_type(callback, context)
+        return
+    if data == "return_confirm":
+        await confirm_return(callback, context)
+        return
+    if data == "return_cancel":
+        await cancel_return_callback(callback, context)
         return
 
     if data.startswith("order_nav:"):
@@ -533,12 +596,16 @@ def build_bot():
     db = get_database()
 
     product_service = ProductCatalogService(db)
+    wallet_service = WalletService(db)
+    return_service = ProductReturnService(db, wallet_service=wallet_service)
 
     shared_services = {
-        "user_service": UserService(db),
+        "user_service": UserService(db, wallet_service=wallet_service),
         "request_service": RequestService(db),
         "order_service": OrderService(db),
         "product_service": product_service,
+        "wallet_service": wallet_service,
+        "return_service": return_service,
         "admin_service": AdminService(db, product_catalog=product_service),
         "bot": client,
     }
@@ -580,6 +647,9 @@ def build_bot():
                 return
             if current_state == ORDER_FACTOR:
                 await receive_order_factor(message, context)
+                return
+            if current_state == RETURN_INVOICE:
+                await receive_return_invoice(message, context)
                 return
         # Fallback: if message has text-like content (rare) let handle_text handle it
         # otherwise ignore other media types for now.

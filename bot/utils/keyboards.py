@@ -17,6 +17,7 @@ BTN_EXPORT = "خروجی اکسل"
 BTN_INFO = "اطلاعات ربات"
 BTN_EDIT_SELLER = "ویرایش مشخصات فروشنده"
 BTN_CREATE_ORDER = "ثبت سریال"
+BTN_RETURN_PRODUCT = "ثبت مرجوعی کالا"
 BTN_WALLET = "کیف پول"
 BTN_EXPORT_ORDERS = "خروجی اکسل سفارش‌ها"
 BTN_PENDING_REQUESTS = "درخواست‌های در انتظار بررسی"
@@ -26,6 +27,7 @@ BTN_ADMIN_MANAGE_PRODUCTS = "مدیریت کالاها"
 BTN_ADMIN_MANAGE_STORES = "مدیریت فروشگاه‌ها"
 BTN_ADMIN_MANAGE_EXPERTS = "مدیریت کارشناسان"
 BTN_ADMIN_MANAGE_BOT = "مدیریت ربات"
+BTN_ADMIN_MANAGE_WALLET = "مدیریت کیف پول"
 BTN_ADMIN_ACTION_REQUESTS = "درخواست‌های مدیریتی"
 BTN_ADMIN_ACTIVE_PRODUCTS = "کالاهای فعال"
 BTN_ADMIN_INACTIVE_PRODUCTS = "کالاهای غیرفعال"
@@ -54,9 +56,10 @@ BTN_DISABLE = "خاموش"
 def seller_main_menu():
     markup = MenuKeyboardMarkup()
     markup.add(MenuKeyboardButton(BTN_CREATE_ORDER), row=1)
-    markup.add(MenuKeyboardButton(BTN_REQUEST_GOODS), row=2)
-    markup.add(MenuKeyboardButton(BTN_MY_REQUESTS), row=3)
-    markup.add(MenuKeyboardButton(BTN_WALLET), row=4)
+    markup.add(MenuKeyboardButton(BTN_RETURN_PRODUCT), row=2)
+    markup.add(MenuKeyboardButton(BTN_REQUEST_GOODS), row=3)
+    markup.add(MenuKeyboardButton(BTN_MY_REQUESTS), row=4)
+    markup.add(MenuKeyboardButton(BTN_WALLET), row=5)
     return markup
 
 
@@ -92,8 +95,9 @@ def admin_management_menu():
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_STORES), row=2)
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_EXPERTS), row=3)
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_BOT), row=4)
-    markup.add(MenuKeyboardButton(BTN_ADMIN_ACTION_REQUESTS), row=5)
-    markup.add(MenuKeyboardButton(BTN_BACK), row=6)
+    markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_WALLET), row=5)
+    markup.add(MenuKeyboardButton(BTN_ADMIN_ACTION_REQUESTS), row=6)
+    markup.add(MenuKeyboardButton(BTN_BACK), row=7)
     return markup
 
 
@@ -417,6 +421,59 @@ def seller_edit_field_keyboard(telegram_id: int):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("ویرایش نام", callback_data=f"edit_seller_name:{telegram_id}"), row=1)
     markup.add(InlineKeyboardButton("ویرایش موبایل", callback_data=f"edit_seller_phone:{telegram_id}"), row=2)
+    return markup
+
+
+def wallet_admin_actions_keyboard(store_code: str):
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("افزایش موجودی", callback_data=f"admin:wallet_action:{store_code}:credit"), row=1)
+    markup.add(InlineKeyboardButton("کاهش موجودی", callback_data=f"admin:wallet_action:{store_code}:debit"), row=2)
+    markup.add(InlineKeyboardButton("تسویه / ارسال به مالی", callback_data=f"admin:wallet_action:{store_code}:settlement"), row=3)
+    markup.add(InlineKeyboardButton("تاریخچه تراکنش‌ها", callback_data=f"admin:wallet_history:{store_code}"), row=4)
+    markup.add(InlineKeyboardButton(BTN_BACK, callback_data="admin:wallet"), row=5)
+    return markup
+
+
+def wallet_admin_confirm_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("تأیید نهایی", callback_data="admin:wallet_confirm"), row=1)
+    markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="admin:wallet_cancel"), row=2)
+    return markup
+
+
+def seller_wallet_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("خروجی اکسل همه تراکنش‌ها", callback_data="seller_wallet_export"), row=1)
+    return markup
+
+
+def return_products_keyboard(products: list[dict]):
+    markup = InlineKeyboardMarkup()
+    for idx, product in enumerate(products, start=1):
+        product_key = product.get("product_key") or product.get("product_code", "")
+        markup.add(
+            InlineKeyboardButton(
+                f"{product.get('product_name', '')} ({product.get('sold_count', 0)} عدد)",
+                callback_data=f"return_product:{product_key}",
+            ),
+            row=idx,
+        )
+    markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="return_cancel"), row=len(products) + 1)
+    return markup
+
+
+def return_type_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("اکبند / قابل فروش", callback_data="return_type:resellable"), row=1)
+    markup.add(InlineKeyboardButton("معیوب / غیرقابل فروش", callback_data="return_type:defective"), row=2)
+    markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="return_cancel"), row=3)
+    return markup
+
+
+def return_confirm_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("تأیید و ثبت مرجوعی", callback_data="return_confirm"), row=1)
+    markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="return_cancel"), row=2)
     return markup
 
 

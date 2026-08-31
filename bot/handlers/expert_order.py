@@ -361,6 +361,7 @@ async def choose_order_product(callback: CallbackQuery, context: dict):
     categories = context.get("categories") or context["product_service"].get_categories()
     product = categories[draft["category_key"]]["products"][product_key]
     draft["product_key"] = product_key
+    draft["product_code"] = product.get("code", product_key)
     draft["product_name"] = product["name"]
     draft["product_model"] = product["model"]
     draft["product_price"] = product.get("price", 0)
@@ -739,6 +740,7 @@ async def order_validation_callback(callback: CallbackQuery, context: dict):
             commission,
             transaction_id,
         ) or order
+        context["order_service"].register_sold_tracking_code(order["id"], unit_index)
         await context["bot"].send_message(
             order["seller_telegram_id"],
             MESSAGES["order_unit_approved_notify"].format(index=unit_index, order_id=order["id"]),
