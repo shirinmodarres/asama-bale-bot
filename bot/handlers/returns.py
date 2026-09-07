@@ -1,7 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 
-from bale import CallbackQuery, Message
+from bale import CallbackQuery, InputFile, Message
 
 from bot.data.messages import MESSAGES
 from bot.data.statuses import ACTIVE
@@ -9,41 +9,20 @@ from bot.services.return_service import ProductReturnError, RETURN_TYPE_LABELS_F
 from bot.utils.keyboards import (
     return_confirm_keyboard,
     return_products_keyboard,
+    return_review_keyboard,
     return_type_keyboard,
     seller_main_menu,
 )
 from bot.utils.normalize import normalize_digits
-from data.static_data import get_role
+from data.static_data import expert_store_codes, get_expert_for_store, get_role
 
 
-RETURN_SELECT_PRODUCT, RETURN_TRACKING, RETURN_TYPE, RETURN_INVOICE, RETURN_SUMMARY = range(70, 75)
+RETURN_SELECT_PRODUCT, RETURN_TRACKING, RETURN_TYPE, RETURN_INVOICE, RETURN_SUMMARY, RETURN_REJECT_REASON = range(70, 76)
 RETURN_PHOTO_DIR = Path("data/uploads/returns")
 
 
 def _format_money(amount: int) -> str:
     return f"{int(amount):,}"
-
-
-def _unit_for_tracking(context: dict, tracking: dict) -> tuple[dict | None, dict | None]:
-    order = context["order_service"].get_order(tracking["order_id"])
-    if not order:
-        return None, None
-    unit = next(
-        (
-            item
-            for item in order.get("units", [])
-            if int(item.get("index", 0)) == int(tracking["unit_index"])
-        ),
-        None,
-    )
-    return order, unit
-
-
-def _commission_for_tracking(context: dict, tracking: dict) -> int:
-    _order, unit = _unit_for_tracking(context, tracking)
-    if not unit:
-        return 0
-    return int(unit.get("commission_amount") or 0)
 
 
 def _summary(draft: dict) -> str:
@@ -52,7 +31,16 @@ def _summary(draft: dict) -> str:
         product_name=draft["product_name"],
         tracking_code=draft["tracking_code"],
         return_type=RETURN_TYPE_LABELS_FA[draft["return_type"]],
-        commission_amount=_format_money(draft["commission_amount"]),
+    )
+
+
+def _return_review_text(product_return: dict) -> str:
+    return MESSAGES["return_for_expert_review"].format(
+        return_id=product_return["return_id"],
+        store_code=product_return["store_code"],
+        product_name=product_return["product_name"],
+        tracking_code=product_return["tracking_code"],
+        return_type=RETURN_TYPE_LABELS_FA.get(product_return["return_type"], product_return["return_type"]),
     )
 
 
@@ -145,7 +133,6 @@ async def receive_return_tracking(message: Message, context: dict):
         await message.reply(MESSAGES["return_tracking_mismatch"])
         return
     draft["tracking_code"] = tracking_code
-    draft["commission_amount"] = _commission_for_tracking(context, tracking)
     await message.reply(MESSAGES["return_select_type"], components=return_type_keyboard())
     context["state"] = RETURN_TYPE
 
@@ -174,13 +161,26 @@ async def confirm_return(callback: CallbackQuery, context: dict):
         context.pop("state", None)
         return
     try:
-        product_return = context["return_service"].create_return(seller, draft)
+        product_return = context["return_service"].create_return_request(seller, draft)
     except ProductReturnError:
         await callback.message.edit(MESSAGES["return_tracking_invalid"])
         return
-    except ValueError:
-        await callback.message.edit(MESSAGES["return_wallet_insufficient"])
-        return
+
+    expert = get_expert_for_store(product_return["store_code"])
+    if expert:
+        await context["bot"].send_message(
+            expert["telegram_id"],
+            _return_review_text(product_return),
+            components=return_review_keyboard(product_return["return_id"]),
+        )
+        invoice_path = Path(product_return.get("invoice_image_path", ""))
+        if invoice_path.is_file():
+            with invoice_path.open("rb") as file:
+                await context["bot"].send_photo(
+                    expert["telegram_id"],
+                    InputFile(file.read(), file_name=invoice_path.name),
+                    caption=f"فاکتور مرجوعی {product_return['return_id']}",
+                )
 
     context.pop("return_seller", None)
     context.pop("return_draft", None)
@@ -203,3 +203,81 @@ async def cancel_return_callback(callback: CallbackQuery, context: dict):
     context.pop("return_products", None)
     context.pop("state", None)
     await callback.message.edit(MESSAGES["return_cancelled"])
+
+
+async def pending_returns(message: Message, context: dict):
+    if get_role(message.author.id) != "expert":
+        await message.reply(MESSAGES["not_allowed"])
+        return
+    returns = context["return_service"].list_pending_for_stores(expert_store_codes(message.author.id))
+    if not returns:
+        await message.reply(MESSAGES["return_no_pending"])
+        return
+    await message.reply(MESSAGES["return_pending_list"])
+    for product_return in returns:
+        await message.reply(
+            _return_review_text(product_return),
+            components=return_review_keyboard(product_return["return_id"]),
+        )
+
+
+async def return_review_callback(callback: CallbackQuery, context: dict):
+    if get_role(callback.from_user.id) != "expert":
+        await callback.message.edit(MESSAGES["not_allowed"])
+        return
+    _prefix, action, return_id = callback.data.split(":", 2)
+    product_return = context["return_service"].get_return(return_id)
+    if not product_return or product_return["store_code"] not in expert_store_codes(callback.from_user.id):
+        await callback.message.edit(MESSAGES["return_not_for_expert"])
+        return
+    if product_return.get("status") != "pending":
+        await callback.message.edit(MESSAGES["return_already_reviewed"])
+        return
+
+    if action == "reject":
+        context["return_review_id"] = return_id
+        context["state"] = RETURN_REJECT_REASON
+        await callback.message.edit(MESSAGES["return_ask_reject_reason"])
+        return
+
+    try:
+        approved = context["return_service"].approve_return(return_id, callback.from_user.id)
+    except ValueError:
+        await callback.message.edit(MESSAGES["return_wallet_insufficient"])
+        return
+    except Exception:
+        await callback.message.edit(MESSAGES["return_tracking_invalid"])
+        return
+
+    performance = approved.get("commission_performance")
+    commission_message = context["commission_service"].build_realtime_message(performance)
+    seller_message = MESSAGES["return_approved_seller"].format(return_id=approved["return_id"])
+    if commission_message:
+        seller_message = f"{seller_message}\n\n{commission_message}"
+    await context["bot"].send_message(approved["seller_telegram_id"], seller_message)
+    await callback.message.edit(MESSAGES["return_approved_expert"].format(return_id=approved["return_id"]))
+
+
+async def receive_return_reject_reason(message: Message, context: dict):
+    if get_role(message.author.id) != "expert":
+        await message.reply(MESSAGES["not_allowed"])
+        context.pop("state", None)
+        return
+    return_id = context.pop("return_review_id", None)
+    if not return_id:
+        await message.reply(MESSAGES["return_already_reviewed"])
+        context.pop("state", None)
+        return
+    reason = (message.content or "").strip()
+    try:
+        product_return = context["return_service"].reject_return(return_id, message.author.id, reason)
+    except ProductReturnError:
+        await message.reply(MESSAGES["return_already_reviewed"])
+        context.pop("state", None)
+        return
+    await context["bot"].send_message(
+        product_return["seller_telegram_id"],
+        MESSAGES["return_rejected_seller"].format(return_id=return_id, reason=reason),
+    )
+    await message.reply(MESSAGES["return_rejected_expert"].format(return_id=return_id))
+    context.pop("state", None)

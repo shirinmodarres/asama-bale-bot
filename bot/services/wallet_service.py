@@ -14,6 +14,7 @@ SOURCE_LABELS_FA = {
     "lottery_prize": "جایزه",
     "settlement": "تسویه / ارسال به مالی",
     "product_return": "مرجوعی کالا",
+    "commission_adjustment": "به‌روزرسانی پورسانت",
     "legacy": "قدیمی",
 }
 
@@ -78,6 +79,7 @@ class WalletService:
         transaction_id: str | None = None,
         admin_telegram_id: int | None = None,
         extra_fields: dict | None = None,
+        allow_negative: bool = False,
         session=None,
     ) -> tuple[dict, bool]:
         telegram_id = int(telegram_id)
@@ -98,7 +100,7 @@ class WalletService:
             "telegram_id": telegram_id,
             "wallet.applied_transaction_ids": {"$ne": transaction_id},
         }
-        if transaction_type == "debit":
+        if transaction_type == "debit" and not allow_negative:
             query["wallet.balance"] = {"$gte": amount}
 
         updated = self.users.find_one_and_update(
