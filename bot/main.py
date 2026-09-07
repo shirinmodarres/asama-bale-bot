@@ -16,6 +16,7 @@ from bot.services.admin_service import AdminService
 from bot.services.product_service import ProductCatalogService
 from bot.services.wallet_service import WalletService
 from bot.services.return_service import ProductReturnService
+from bot.services.commission_service import CommissionService
 from bot.data.messages import MESSAGES
 from bot.utils.keyboards import (
     BTN_REQUEST_GOODS,
@@ -40,6 +41,7 @@ from bot.utils.keyboards import (
     BTN_ADMIN_MANAGE_EXPERTS,
     BTN_ADMIN_MANAGE_BOT,
     BTN_ADMIN_MANAGE_WALLET,
+    BTN_ADMIN_MANAGE_COMMISSION,
     BTN_ADMIN_ACTION_REQUESTS,
     BTN_ADMIN_ACTIVE_PRODUCTS,
     BTN_ADMIN_INACTIVE_PRODUCTS,
@@ -103,18 +105,24 @@ from bot.handlers.expert import (
     EXPERT_REJECT_REASON, EXPERT_EDIT_ITEM, EXPERT_EDIT_QUANTITY,
     EDIT_SELLER_PICK, EDIT_SELLER_FIELD, EDIT_SELLER_NAME, EDIT_SELLER_PHONE
 )
-from bot.handlers.admin import bot_info, export_requests, export_orders
+from bot.handlers.admin import bot_info, export_requests, export_orders, create_commission_rule
 from bot.handlers.admin_panel import (
     admin_panel, admin_menu_callback, receive_admin_reject_reason,
     receive_wallet_amount, receive_wallet_description,
+    start_commission_rule_flow, receive_commission_month,
+    receive_commission_base_rate, receive_commission_threshold,
+    receive_commission_bonus_rate,
     ADMIN_REJECT_REASON, ADMIN_WALLET_AMOUNT, ADMIN_WALLET_DESCRIPTION,
+    ADMIN_COMMISSION_MONTH, ADMIN_COMMISSION_BASE_RATE,
+    ADMIN_COMMISSION_THRESHOLD, ADMIN_COMMISSION_BONUS_RATE,
 )
 from bot.handlers.returns import (
     return_start, choose_return_product,
     choose_return_type, receive_return_tracking, receive_return_invoice,
     confirm_return, cancel_return, cancel_return_callback,
+    pending_returns, return_review_callback, receive_return_reject_reason,
     RETURN_SELECT_PRODUCT, RETURN_TYPE, RETURN_TRACKING,
-    RETURN_INVOICE, RETURN_SUMMARY,
+    RETURN_INVOICE, RETURN_SUMMARY, RETURN_REJECT_REASON,
 )
 
 logger = logging.getLogger(__name__)
@@ -183,6 +191,7 @@ async def handle_text(message: Message, context: dict):
         await message.reply(MESSAGES["expert_pending_reviews"])
         await pending_requests(message, context)
         await pending_orders(message, context)
+        await pending_returns(message, context)
         return
     if text == BTN_EDIT_SELLER:
         await edit_seller_start(message, context)
@@ -225,6 +234,12 @@ async def handle_text(message: Message, context: dict):
             MESSAGES["admin_wallet_store_list"],
             components=stores_keyboard(stores, "admin:wallet_store", back_callback="admin:main"),
         )
+        return
+    if text == BTN_ADMIN_MANAGE_COMMISSION:
+        if get_role(message.author.id) != "admin":
+            await message.reply(MESSAGES["not_allowed"])
+            return
+        await start_commission_rule_flow(message, context)
         return
     if text == BTN_ADMIN_ACTION_REQUESTS:
         await message.reply(MESSAGES["admin_action_requests"], components=admin_action_requests_keyboard(context["admin_service"].list_admin_action_requests()))
@@ -406,6 +421,9 @@ async def handle_text(message: Message, context: dict):
     if current_state == RETURN_INVOICE:
         await receive_return_invoice(message, context)
         return
+    if current_state == RETURN_REJECT_REASON:
+        await receive_return_reject_reason(message, context)
+        return
 
     # ====== ثبت‌نام ======
     if current_state == STORE_CODE:
@@ -444,6 +462,18 @@ async def handle_text(message: Message, context: dict):
     if current_state == ADMIN_WALLET_DESCRIPTION:
         await receive_wallet_description(message, context)
         return
+    if current_state == ADMIN_COMMISSION_MONTH:
+        await receive_commission_month(message, context)
+        return
+    if current_state == ADMIN_COMMISSION_BASE_RATE:
+        await receive_commission_base_rate(message, context)
+        return
+    if current_state == ADMIN_COMMISSION_THRESHOLD:
+        await receive_commission_threshold(message, context)
+        return
+    if current_state == ADMIN_COMMISSION_BONUS_RATE:
+        await receive_commission_bonus_rate(message, context)
+        return
 
     # ====== دستورات /start و غیره ======
     if text.startswith("/start"):
@@ -457,6 +487,9 @@ async def handle_text(message: Message, context: dict):
         return
     if text.startswith("/export_orders"):
         await export_orders(message, context)
+        return
+    if text.startswith("/commission_rule"):
+        await create_commission_rule(message, context)
         return
 
 
@@ -490,6 +523,9 @@ async def handle_callback_query(callback: CallbackQuery, context: dict):
         return
     if data == "return_cancel":
         await cancel_return_callback(callback, context)
+        return
+    if data.startswith("return_review:"):
+        await return_review_callback(callback, context)
         return
 
     if data.startswith("order_nav:"):
@@ -597,14 +633,17 @@ def build_bot():
 
     product_service = ProductCatalogService(db)
     wallet_service = WalletService(db)
-    return_service = ProductReturnService(db, wallet_service=wallet_service)
+    user_service = UserService(db, wallet_service=wallet_service)
+    commission_service = CommissionService(db, wallet_service=wallet_service, user_service=user_service)
+    return_service = ProductReturnService(db, commission_service=commission_service)
 
     shared_services = {
-        "user_service": UserService(db, wallet_service=wallet_service),
+        "user_service": user_service,
         "request_service": RequestService(db),
         "order_service": OrderService(db),
         "product_service": product_service,
         "wallet_service": wallet_service,
+        "commission_service": commission_service,
         "return_service": return_service,
         "admin_service": AdminService(db, product_catalog=product_service),
         "bot": client,

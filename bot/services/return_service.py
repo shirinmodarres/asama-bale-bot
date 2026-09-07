@@ -1,10 +1,8 @@
 from datetime import datetime, timezone
 
 from pymongo import ASCENDING, ReturnDocument
-from pymongo.errors import OperationFailure
+from pymongo.errors import DuplicateKeyError
 
-from bot.services.user_service import calculate_commission
-from bot.services.wallet_service import WalletService
 from bot.utils.datetime_format import jalali_datetime_parts
 from bot.utils.normalize import normalize_digits
 
@@ -29,19 +27,20 @@ class ProductReturnError(Exception):
 
 
 class ProductReturnService:
-    def __init__(self, db, wallet_service: WalletService | None = None):
+    def __init__(self, db, commission_service=None):
         self.db = db
         self.orders = db["orders"]
         self.returns = db["product_returns"]
         self.tracking_codes = db["product_tracking_codes"]
         self.counters = db["counters"]
-        self.wallet_service = wallet_service or WalletService(db)
+        self.commission_service = commission_service
         self.ensure_indexes()
 
     def ensure_indexes(self) -> None:
         self.tracking_codes.create_index("tracking_code", unique=True)
         self.returns.create_index("return_id", unique=True)
         self.returns.create_index("tracking_code")
+        self.returns.create_index([("status", ASCENDING), ("store_code", ASCENDING), ("requested_at", ASCENDING)])
         self.returns.create_index([("seller_telegram_id", ASCENDING), ("created_at", ASCENDING)])
         self.returns.create_index([("store_code", ASCENDING), ("created_at", ASCENDING)])
 
@@ -116,37 +115,126 @@ class ProductReturnService:
             return None
         return tracking
 
-    def create_return(self, seller: dict, draft: dict, admin_telegram_id: int | None = None) -> dict:
+    def create_return_request(self, seller: dict, draft: dict) -> dict:
         tracking_code = normalize_digits(draft["tracking_code"])
         return_type = draft["return_type"]
         if return_type not in RETURN_STATUS_BY_TYPE:
             raise ProductReturnError("invalid return type")
 
-        session = self.db.client.start_session()
+        tracking, order, unit = self._load_return_context(seller, tracking_code)
+        if self.returns.find_one(
+            {
+                "order_id": tracking["order_id"],
+                "unit_index": int(tracking["unit_index"]),
+                "status": {"$in": ["pending", "approved"]},
+            },
+            {"_id": 1},
+        ):
+            raise ProductReturnError("duplicate return")
+        return_id = self._next_return_id()
+        now = utc_now()
+        document = self._return_document(seller, draft, tracking, order, unit, return_type, return_id, now)
         try:
-            with session.start_transaction():
-                return self._create_return_in_transaction(
-                    seller,
-                    draft,
-                    tracking_code,
-                    return_type,
-                    admin_telegram_id,
-                    session=session,
-                )
-        except OperationFailure as exc:
-            if exc.code != 20:
-                raise
-            return self._create_return_without_transaction(
-                seller,
-                draft,
-                tracking_code,
-                return_type,
-                admin_telegram_id,
-            )
-        finally:
-            session.end_session()
+            self.returns.insert_one(document)
+        except DuplicateKeyError:
+            raise ProductReturnError("duplicate return")
+        document.pop("_id", None)
+        return document
 
-    def _load_return_context(self, seller: dict, tracking_code: str, session=None) -> tuple[dict, dict, dict, int]:
+    def create_return(self, seller: dict, draft: dict, admin_telegram_id: int | None = None) -> dict:
+        return self.create_return_request(seller, draft)
+
+    def get_return(self, return_id: str) -> dict | None:
+        return self.returns.find_one({"return_id": return_id}, {"_id": 0})
+
+    def list_pending_for_stores(self, store_codes: set[str]) -> list[dict]:
+        return list(
+            self.returns.find(
+                {
+                    "status": "pending",
+                    "store_code": {"$in": [str(code) for code in store_codes]},
+                },
+                {"_id": 0},
+            ).sort("requested_at", 1)
+        )
+
+    def approve_return(self, return_id: str, expert_telegram_id: int) -> dict:
+        product_return = self.returns.find_one({"return_id": return_id, "status": "pending"})
+        if not product_return:
+            raise ProductReturnError("return is not pending")
+
+        now = utc_now()
+        tracking_code = product_return["tracking_code"]
+        updated_tracking = self.tracking_codes.update_one(
+            {"tracking_code": tracking_code, "status": "sold"},
+            {
+                "$set": {
+                    "status": RETURN_STATUS_BY_TYPE[product_return["return_type"]],
+                    "returned_at": now,
+                    "updated_at": now,
+                }
+            },
+        )
+        if updated_tracking.modified_count != 1:
+            raise ProductReturnError("tracking is not sold")
+
+        updated_return = self.returns.find_one_and_update(
+            {"return_id": return_id, "status": "pending"},
+            {
+                "$set": {
+                    "status": "approved",
+                    "reviewed_at": now,
+                    "reviewed_by": int(expert_telegram_id),
+                    "updated_at": now,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if not updated_return:
+            self.tracking_codes.update_one(
+                {"tracking_code": tracking_code, "status": RETURN_STATUS_BY_TYPE[product_return["return_type"]]},
+                {"$set": {"status": "sold", "returned_at": None, "updated_at": utc_now()}},
+            )
+            raise ProductReturnError("return already reviewed")
+
+        try:
+            if self.commission_service:
+                updated_return["commission_performance"] = self.commission_service.recalculate_for_return(updated_return)
+        except Exception:
+            self.returns.update_one(
+                {"return_id": return_id},
+                {"$set": {"status": "pending", "reviewed_at": None, "reviewed_by": None, "updated_at": utc_now()}},
+            )
+            self.tracking_codes.update_one(
+                {"tracking_code": tracking_code, "status": RETURN_STATUS_BY_TYPE[product_return["return_type"]]},
+                {"$set": {"status": "sold", "returned_at": None, "updated_at": utc_now()}},
+            )
+            raise
+
+        updated_return.pop("_id", None)
+        return updated_return
+
+    def reject_return(self, return_id: str, expert_telegram_id: int, rejection_reason: str) -> dict:
+        now = utc_now()
+        product_return = self.returns.find_one_and_update(
+            {"return_id": return_id, "status": "pending"},
+            {
+                "$set": {
+                    "status": "rejected",
+                    "reviewed_at": now,
+                    "reviewed_by": int(expert_telegram_id),
+                    "rejection_reason": rejection_reason,
+                    "updated_at": now,
+                }
+            },
+            return_document=ReturnDocument.AFTER,
+        )
+        if not product_return:
+            raise ProductReturnError("return is not pending")
+        product_return.pop("_id", None)
+        return product_return
+
+    def _load_return_context(self, seller: dict, tracking_code: str, session=None) -> tuple[dict, dict, dict]:
         tracking = self.tracking_codes.find_one(
             {
                 "tracking_code": tracking_code,
@@ -174,23 +262,21 @@ class ProductReturnService:
         if not unit:
             raise ProductReturnError("unit not found")
 
-        commission_amount = int(unit.get("commission_amount") or 0)
-        if commission_amount <= 0:
-            commission_amount = calculate_commission(order.get("product_price", 0))
-        return tracking, order, unit, commission_amount
+        return tracking, order, unit
 
     def _return_document(
         self,
         seller: dict,
         draft: dict,
         tracking: dict,
+        order: dict,
+        unit: dict,
         return_type: str,
-        commission_amount: int,
         return_id: str,
-        wallet_transaction_id: str,
         now: str,
     ) -> dict:
         jalali_date, jalali_month, tehran_time = jalali_datetime_parts(now)
+        sold_at = tracking.get("sold_at") or unit.get("validation_decision_at") or order.get("updated_at") or order.get("created_at")
         return {
             "return_id": return_id,
             "order_id": tracking["order_id"],
@@ -199,121 +285,26 @@ class ProductReturnService:
             "product_key": tracking.get("product_key", ""),
             "product_code": tracking.get("product_code", ""),
             "product_name": tracking.get("product_name", ""),
+            "product_price": int(unit.get("product_price") or order.get("product_price") or 0),
             "quantity": int(draft.get("quantity", 1)),
             "return_type": return_type,
             "return_type_label": RETURN_TYPE_LABELS_FA[return_type],
             "store_code": str(seller["store_code"]),
             "seller_telegram_id": int(seller["telegram_id"]),
             "invoice_image_path": draft["invoice_image_path"],
-            "commission_amount": commission_amount,
-            "wallet_transaction_id": wallet_transaction_id,
+            "status": "pending",
+            "requested_at": now,
+            "reviewed_at": None,
+            "reviewed_by": None,
+            "rejection_reason": None,
+            "sold_at": sold_at,
+            "sale_month": jalali_datetime_parts(sold_at)[1] if sold_at else jalali_month,
             "created_at": now,
             "jalali_date": jalali_date,
             "jalali_month": jalali_month,
             "tehran_time": tehran_time,
+            "updated_at": now,
         }
-
-    def _create_return_in_transaction(
-        self,
-        seller: dict,
-        draft: dict,
-        tracking_code: str,
-        return_type: str,
-        admin_telegram_id: int | None,
-        session,
-    ) -> dict:
-        tracking, _order, _unit, commission_amount = self._load_return_context(seller, tracking_code, session=session)
-        return_id = self._next_return_id(session=session)
-        wallet_transaction_id = f"wallet:return:{return_id}:{tracking_code}"
-        now = utc_now()
-        document = self._return_document(
-            seller, draft, tracking, return_type, commission_amount, return_id, wallet_transaction_id, now
-        )
-        self.returns.insert_one(document, session=session)
-        self._mark_tracking_returned(tracking_code, return_type, now, session=session)
-        transaction, _applied = self._debit_return_commission(
-            seller, tracking, commission_amount, return_id, wallet_transaction_id, admin_telegram_id, session=session
-        )
-        document["wallet_balance_after"] = transaction.get("balance_after")
-        document.pop("_id", None)
-        return document
-
-    def _create_return_without_transaction(
-        self,
-        seller: dict,
-        draft: dict,
-        tracking_code: str,
-        return_type: str,
-        admin_telegram_id: int | None,
-    ) -> dict:
-        tracking, _order, _unit, commission_amount = self._load_return_context(seller, tracking_code)
-        if self.wallet_service.get_balance(seller["telegram_id"]) < commission_amount:
-            raise ValueError("insufficient balance or user not found")
-
-        return_id = self._next_return_id()
-        wallet_transaction_id = f"wallet:return:{return_id}:{tracking_code}"
-        now = utc_now()
-        document = self._return_document(
-            seller, draft, tracking, return_type, commission_amount, return_id, wallet_transaction_id, now
-        )
-        self.returns.insert_one(document)
-        try:
-            self._mark_tracking_returned(tracking_code, return_type, now)
-            transaction, _applied = self._debit_return_commission(
-                seller, tracking, commission_amount, return_id, wallet_transaction_id, admin_telegram_id
-            )
-        except Exception:
-            self.tracking_codes.update_one(
-                {"tracking_code": tracking_code, "status": RETURN_STATUS_BY_TYPE[return_type]},
-                {"$set": {"status": "sold", "returned_at": None, "updated_at": utc_now()}},
-            )
-            self.returns.delete_one({"return_id": return_id})
-            raise
-        document["wallet_balance_after"] = transaction.get("balance_after")
-        document.pop("_id", None)
-        return document
-
-    def _mark_tracking_returned(self, tracking_code: str, return_type: str, now: str, session=None) -> None:
-        updated_tracking = self.tracking_codes.update_one(
-            {"tracking_code": tracking_code, "status": "sold"},
-            {
-                "$set": {
-                    "status": RETURN_STATUS_BY_TYPE[return_type],
-                    "returned_at": now,
-                    "updated_at": now,
-                }
-            },
-            session=session,
-        )
-        if updated_tracking.modified_count != 1:
-            raise ProductReturnError("tracking already returned")
-
-    def _debit_return_commission(
-        self,
-        seller: dict,
-        tracking: dict,
-        commission_amount: int,
-        return_id: str,
-        wallet_transaction_id: str,
-        admin_telegram_id: int | None,
-        session=None,
-    ) -> tuple[dict, bool]:
-        return self.wallet_service.apply_transaction(
-            telegram_id=seller["telegram_id"],
-            store_code=seller["store_code"],
-            transaction_type="debit",
-            source="product_return",
-            amount=commission_amount,
-            description=f"کسر پورسانت بابت مرجوعی کالای {tracking.get('product_name', '')}",
-            transaction_id=wallet_transaction_id,
-            admin_telegram_id=admin_telegram_id,
-            extra_fields={
-                "related_order_id": tracking["order_id"],
-                "related_return_id": return_id,
-                "tracking_code": tracking["tracking_code"],
-            },
-            session=session,
-        )
 
     def _next_return_id(self, session=None) -> str:
         counter = self.counters.find_one_and_update(

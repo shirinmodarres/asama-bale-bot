@@ -28,6 +28,7 @@ BTN_ADMIN_MANAGE_STORES = "مدیریت فروشگاه‌ها"
 BTN_ADMIN_MANAGE_EXPERTS = "مدیریت کارشناسان"
 BTN_ADMIN_MANAGE_BOT = "مدیریت ربات"
 BTN_ADMIN_MANAGE_WALLET = "مدیریت کیف پول"
+BTN_ADMIN_MANAGE_COMMISSION = "مدیریت قانون پورسانت"
 BTN_ADMIN_ACTION_REQUESTS = "درخواست‌های مدیریتی"
 BTN_ADMIN_ACTIVE_PRODUCTS = "کالاهای فعال"
 BTN_ADMIN_INACTIVE_PRODUCTS = "کالاهای غیرفعال"
@@ -96,8 +97,9 @@ def admin_management_menu():
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_EXPERTS), row=3)
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_BOT), row=4)
     markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_WALLET), row=5)
-    markup.add(MenuKeyboardButton(BTN_ADMIN_ACTION_REQUESTS), row=6)
-    markup.add(MenuKeyboardButton(BTN_BACK), row=7)
+    markup.add(MenuKeyboardButton(BTN_ADMIN_MANAGE_COMMISSION), row=6)
+    markup.add(MenuKeyboardButton(BTN_ADMIN_ACTION_REQUESTS), row=7)
+    markup.add(MenuKeyboardButton(BTN_BACK), row=8)
     return markup
 
 
@@ -441,6 +443,13 @@ def wallet_admin_confirm_keyboard():
     return markup
 
 
+def commission_rule_confirm_keyboard():
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("تأیید و ثبت قانون", callback_data="admin:commission_confirm"), row=1)
+    markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="admin:commission_cancel"), row=2)
+    return markup
+
+
 def seller_wallet_keyboard():
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("خروجی اکسل همه تراکنش‌ها", callback_data="seller_wallet_export"), row=1)
@@ -474,6 +483,13 @@ def return_confirm_keyboard():
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton("تأیید و ثبت مرجوعی", callback_data="return_confirm"), row=1)
     markup.add(InlineKeyboardButton(BTN_CANCEL, callback_data="return_cancel"), row=2)
+    return markup
+
+
+def return_review_keyboard(return_id: str):
+    markup = InlineKeyboardMarkup()
+    markup.add(InlineKeyboardButton("تأیید مرجوعی", callback_data=f"return_review:approve:{return_id}"), row=1)
+    markup.add(InlineKeyboardButton("رد مرجوعی", callback_data=f"return_review:reject:{return_id}"), row=2)
     return markup
 
 

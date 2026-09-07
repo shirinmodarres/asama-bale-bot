@@ -17,7 +17,9 @@ from bot.utils.keyboards import (
     admin_action_request_detail_keyboard,
     wallet_admin_actions_keyboard,
     wallet_admin_confirm_keyboard,
+    commission_rule_confirm_keyboard,
 )
+from bot.services.commission_service import BASIS_SALES_AMOUNT
 from bot.services.admin_service import AdminService
 from bot.services.wallet_service import SOURCE_LABELS_FA, TYPE_LABELS_FA, manual_transaction_id
 from bot.utils.normalize import normalize_digits
@@ -41,7 +43,11 @@ from data.static_data import get_role, get_sales_manager
     ADMIN_REJECT_REASON,
     ADMIN_WALLET_AMOUNT,
     ADMIN_WALLET_DESCRIPTION,
-) = range(40, 57)
+    ADMIN_COMMISSION_MONTH,
+    ADMIN_COMMISSION_BASE_RATE,
+    ADMIN_COMMISSION_THRESHOLD,
+    ADMIN_COMMISSION_BONUS_RATE,
+) = range(40, 61)
 
 
 def _format_money(amount: int) -> str:
@@ -50,12 +56,44 @@ def _format_money(amount: int) -> str:
     return f"{int(amount):,}"
 
 
+def _format_rate(rate: float) -> str:
+    number = float(rate or 0)
+    if number.is_integer():
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
 def _wallet_operation_label(operation: str) -> str:
     return {
         "credit": "افزایش موجودی",
         "debit": "کاهش موجودی",
         "settlement": "تسویه / ارسال به مالی",
     }.get(operation, operation)
+
+
+def _parse_positive_float(value: str) -> float | None:
+    text = normalize_digits(value or "").replace("٪", "").replace("%", "").replace("،", ".").replace(",", ".").strip()
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    return number if number > 0 else None
+
+
+def _parse_positive_int(value: str) -> int | None:
+    text = normalize_digits(value or "").replace(",", "").replace("،", "").strip()
+    if not text.isdigit():
+        return None
+    number = int(text)
+    return number if number > 0 else None
+
+
+def _valid_jalali_month(value: str) -> bool:
+    parts = value.split("/")
+    if len(parts) != 2:
+        return False
+    year, month = parts
+    return year.isdigit() and len(year) == 4 and month.isdigit() and 1 <= int(month) <= 12
 
 
 def _get_admin_action_description(request: dict, admin_service: AdminService) -> str:
@@ -169,6 +207,23 @@ async def admin_menu_callback(callback: CallbackQuery, context: dict):
             await callback.message.edit(MESSAGES["not_allowed"])
             return
         await _confirm_wallet_operation(callback, context)
+        return
+    if data == "admin:commission":
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        await start_commission_rule_flow(callback.message, context)
+        return
+    if data == "admin:commission_cancel":
+        context.pop("admin_commission_rule_draft", None)
+        context.pop("state", None)
+        await callback.message.edit(MESSAGES["admin_commission_cancelled"])
+        return
+    if data == "admin:commission_confirm":
+        if role != "admin":
+            await callback.message.edit(MESSAGES["not_allowed"])
+            return
+        await confirm_commission_rule(callback, context)
         return
     if data == "admin:stores":
         await callback.message.edit(MESSAGES["admin_stores_list"], components=admin_stores_menu())
@@ -418,6 +473,83 @@ async def receive_admin_reject_reason(message: Message, context: dict):
     context.pop("state", None)
 
 
+async def start_commission_rule_flow(message, context: dict):
+    context["admin_commission_rule_draft"] = {}
+    context["state"] = ADMIN_COMMISSION_MONTH
+    await message.reply(MESSAGES["admin_commission_start"])
+
+
+async def receive_commission_month(message: Message, context: dict):
+    month = normalize_digits(message.content or "").strip()
+    if not _valid_jalali_month(month):
+        await message.reply(MESSAGES["admin_commission_invalid_month"])
+        return
+    year, month_number = month.split("/")
+    context["admin_commission_rule_draft"] = {"month": f"{year}/{int(month_number):02d}"}
+    context["state"] = ADMIN_COMMISSION_BASE_RATE
+    await message.reply(MESSAGES["admin_commission_ask_base_rate"])
+
+
+async def receive_commission_base_rate(message: Message, context: dict):
+    rate = _parse_positive_float(message.content or "")
+    if rate is None:
+        await message.reply(MESSAGES["admin_commission_invalid_number"])
+        return
+    context["admin_commission_rule_draft"]["base_rate"] = rate
+    context["state"] = ADMIN_COMMISSION_THRESHOLD
+    await message.reply(MESSAGES["admin_commission_ask_threshold"])
+
+
+async def receive_commission_threshold(message: Message, context: dict):
+    threshold_toman = _parse_positive_int(message.content or "")
+    if threshold_toman is None:
+        await message.reply(MESSAGES["admin_commission_invalid_number"])
+        return
+    context["admin_commission_rule_draft"]["threshold_toman"] = threshold_toman
+    context["admin_commission_rule_draft"]["threshold_rial"] = threshold_toman * 10
+    context["state"] = ADMIN_COMMISSION_BONUS_RATE
+    await message.reply(MESSAGES["admin_commission_ask_bonus_rate"])
+
+
+async def receive_commission_bonus_rate(message: Message, context: dict):
+    rate = _parse_positive_float(message.content or "")
+    if rate is None:
+        await message.reply(MESSAGES["admin_commission_invalid_number"])
+        return
+    draft = context["admin_commission_rule_draft"]
+    draft["bonus_rate"] = rate
+    context.pop("state", None)
+    await message.reply(
+        MESSAGES["admin_commission_confirm"].format(
+            month=draft["month"],
+            base_rate=_format_rate(draft["base_rate"]),
+            threshold_toman=_format_money(draft["threshold_toman"]),
+            threshold_rial=_format_money(draft["threshold_rial"]),
+            bonus_rate=_format_rate(draft["bonus_rate"]),
+        ),
+        components=commission_rule_confirm_keyboard(),
+    )
+
+
+async def confirm_commission_rule(callback: CallbackQuery, context: dict):
+    draft = context.get("admin_commission_rule_draft")
+    if not draft:
+        await callback.message.edit(MESSAGES["request_not_found"])
+        return
+    rule = context["commission_service"].create_rule(
+        month=draft["month"],
+        basis=BASIS_SALES_AMOUNT,
+        tiers=[
+            {"min": 0, "max": None, "rate": draft["base_rate"]},
+            {"min": draft["threshold_rial"], "max": None, "rate": draft["bonus_rate"]},
+        ],
+        admin_telegram_id=callback.from_user.id,
+    )
+    context.pop("admin_commission_rule_draft", None)
+    context.pop("state", None)
+    await callback.message.edit(MESSAGES["commission_rule_saved"].format(month=rule["month"], version=rule["version"]))
+
+
 async def _show_wallet_detail(message, context: dict, store_code: str):
     store = context["admin_service"].get_store(store_code)
     seller = context["user_service"].get_approved_seller_by_store(store_code)
@@ -559,10 +691,15 @@ async def _notify_seller_wallet_changed(
     draft: dict,
     transaction: dict,
 ) -> None:
+    message_key = {
+        "credit": "seller_wallet_admin_credit",
+        "debit": "seller_wallet_admin_debit",
+        "settlement": "seller_wallet_admin_settlement",
+    }.get(draft["operation"], "seller_wallet_admin_changed")
     try:
         await context["bot"].send_message(
             draft["seller_telegram_id"],
-            MESSAGES["seller_wallet_admin_changed"].format(
+            MESSAGES[message_key].format(
                 operation=_wallet_operation_label(draft["operation"]),
                 amount=_format_money(transaction.get("amount", draft["amount"])),
                 balance_before=_format_money(transaction.get("balance_before", draft.get("balance_before", 0))),

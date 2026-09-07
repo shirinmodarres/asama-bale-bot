@@ -329,6 +329,8 @@ class OrderService:
 
         for unit in units:
             if int(unit["index"]) == int(unit_index):
+                if unit.get("validation_status", "pending") != "pending":
+                    return None
 
                 unit.update(changes)
                 unit["validation_decision_at"] = utc_now()

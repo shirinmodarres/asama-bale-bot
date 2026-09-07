@@ -5,7 +5,6 @@ from pathlib import Path
 
 from bot.data.messages import MESSAGES, VALIDATION_REJECTION_REASONS
 from bot.data.statuses import ACTIVE, order_status_label
-from bot.services.user_service import COMMISSION_PERCENT, calculate_commission
 from bot.utils.keyboards import (
     BTN_CANCEL,
     categories_keyboard,
@@ -720,47 +719,31 @@ async def order_validation_callback(callback: CallbackQuery, context: dict):
                 order_id, unit_index,
             )
             await callback.message.reply(
-                MESSAGES.get("order_unit_approve_failed", "❌ تایید سریال با خطا مواجه شد. لطفاً دوباره تلاش کنید.")
+                MESSAGES["order_unit_approve_failed"]
             )
             return
+        if not order:
+            await callback.message.reply(MESSAGES["order_unit_already_reviewed"])
+            return
 
-        # مرحله‌ی ۲: DB با موفقیت آپدیت شد؛ حالا محاسبه‌ی کمیسیون و اطلاع به فروشنده.
-        commission = calculate_commission(order.get("product_price", 0))
-        transaction_id = f"wallet:{order['id']}:{unit_index}"
-        wallet, credited = context["user_service"].credit_wallet(
-            order["seller_telegram_id"],
-            commission,
-            transaction_id=transaction_id,
-            description=f"شارژ بابت تایید فاکتور سفارش {order['id']} کالای {unit_index}",
-        )
-        order = context["order_service"].save_unit_commission(
-            order["id"],
-            unit_index,
-            COMMISSION_PERCENT,
-            commission,
-            transaction_id,
-        ) or order
         context["order_service"].register_sold_tracking_code(order["id"], unit_index)
-        await context["bot"].send_message(
-            order["seller_telegram_id"],
-            MESSAGES["order_unit_approved_notify"].format(index=unit_index, order_id=order["id"]),
-        )
-        if credited:
-            await context["bot"].send_message(
-                order["seller_telegram_id"],
-                MESSAGES["order_unit_wallet_charged_notify"].format(
-                    amount=_format_money(commission),
-                    balance=_format_money(wallet["balance"]),
-                ),
-            )
-
-        # مرحله‌ی ۳: پیام کارشناس را به وضعیت نهایی تغییر می‌دهیم و دکمه‌ها را
-        # حذف می‌کنیم تا امکان تأیید دوباره‌ی همان سریال از طریق UI هم گرفته شود
-        # (علاوه بر چکِ validation_status بالای همین تابع).
         approved_unit = next(
             (item for item in order.get("units", []) if int(item["index"]) == unit_index),
             unit,
         )
+        performance = context["commission_service"].recalculate_for_sale(order, approved_unit)
+        commission_message = context["commission_service"].build_realtime_message(performance)
+        seller_message = MESSAGES["order_unit_approved_notify"].format(index=unit_index, order_id=order["id"])
+        if commission_message:
+            seller_message = f"{seller_message}\n\n{commission_message}"
+        await context["bot"].send_message(
+            order["seller_telegram_id"],
+            seller_message,
+        )
+
+        # مرحله‌ی ۳: پیام کارشناس را به وضعیت نهایی تغییر می‌دهیم و دکمه‌ها را
+        # حذف می‌کنیم تا امکان تأیید دوباره‌ی همان سریال از طریق UI هم گرفته شود
+        # (علاوه بر چکِ validation_status بالای همین تابع).
         expert_text = _unit_approved_expert_text(order, approved_unit)
         await context["bot"].send_message(
             callback.from_user.id,
@@ -789,15 +772,32 @@ async def order_validation_callback(callback: CallbackQuery, context: dict):
 
 async def choose_order_rejection_reason(callback: CallbackQuery, context: dict):
     reason_key = callback.data.split(":", 1)[1]
+    order_id = context.get("validate_order_id")
+    unit_index = context.get("validate_unit_index")
+    if not order_id or not unit_index:
+        await callback.message.edit(MESSAGES["order_validation_expired"])
+        context.pop("order_rejection_reason_key", None)
+        context.pop("state", None)
+        return
     if reason_key == "other":
         context["order_rejection_reason_key"] = reason_key
         await callback.message.edit(MESSAGES["order_custom_rejection_reason"])
         context["state"] = ORDER_CUSTOM_REJECT_REASON
         return
-    reason = VALIDATION_REJECTION_REASONS[reason_key]
-    order_id = context.pop("validate_order_id")
-    unit_index = context.pop("validate_unit_index")
+    reason = VALIDATION_REJECTION_REASONS.get(reason_key)
+    if not reason:
+        await callback.message.edit(MESSAGES["order_validation_expired"])
+        context.pop("validate_order_id", None)
+        context.pop("validate_unit_index", None)
+        context.pop("state", None)
+        return
+    context.pop("validate_order_id", None)
+    context.pop("validate_unit_index", None)
     order = context["order_service"].reject_unit_validation(order_id, unit_index, reason_key, reason)
+    if not order:
+        await callback.message.edit(MESSAGES["order_unit_already_reviewed"])
+        context.pop("state", None)
+        return
     await context["bot"].send_message(
         order["seller_telegram_id"],
         MESSAGES["order_unit_rejected_notify"].format(index=unit_index, order_id=order["id"], reason=reason),
@@ -818,11 +818,19 @@ async def choose_order_rejection_reason(callback: CallbackQuery, context: dict):
 
 
 async def receive_custom_rejection_reason(message: Message, context: dict):
-    reason_key = context.pop("order_rejection_reason_key")
-    order_id = context.pop("validate_order_id")
-    unit_index = context.pop("validate_unit_index")
+    reason_key = context.pop("order_rejection_reason_key", None)
+    order_id = context.pop("validate_order_id", None)
+    unit_index = context.pop("validate_unit_index", None)
+    if not reason_key or not order_id or not unit_index:
+        await message.reply(MESSAGES["order_validation_expired"])
+        context.pop("state", None)
+        return
     reason = message.content.strip()
     order = context["order_service"].reject_unit_validation(order_id, unit_index, reason_key, reason)
+    if not order:
+        await message.reply(MESSAGES["order_unit_already_reviewed"])
+        context.pop("state", None)
+        return
     await context["bot"].send_message(
         order["seller_telegram_id"],
         MESSAGES["order_unit_rejected_notify"].format(index=unit_index, order_id=order["id"], reason=reason),
